@@ -54,6 +54,7 @@ Start at logon: `powershell -ExecutionPolicy Bypass -File scripts\install-startu
 ## How it works
 
 - **Activation.** Vosk listens locally with a closed grammar (`paula`, `paula port`) and a confidence threshold. When the foreground app is on the exclusion list, or is fullscreen (a game), the wake word is ignored and only Ctrl+Shift+P works (5 s banner, Esc cancels).
+- **Conversation mode.** After a spoken reply Paula listens again for `CONVERSATION_SECONDS` (default 8) without the wake word, so you can keep talking. Silence, a goodbye ("gracias, Paula", "adiós", "eso es todo"), Esc, the chat or Dormir end it. It never continues while an excluded app (Discord, a game) is in front, and not after a confirmation question.
 - **Listening.** Only after activation, the mic records one utterance (until about 1 s of silence) and Faster-Whisper transcribes it locally. Nothing is stored.
 - **Hub.** The text goes to the hub as a signed `Order`. Replies (`Result`) set the robot state, add a chat bubble and are spoken with ElevenLabs when `speak` is true.
 - **Commands.** The hub sends `Action`s; only `open_app` (apps from `config/default_apps.json` or `APPS_FILE`), `system_status` and `shutdown_pc` (needs `confirmed`, 60 s grace, `shutdown /a` cancels) run. Each one reports an `Event`.

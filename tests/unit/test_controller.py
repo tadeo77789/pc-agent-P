@@ -95,7 +95,8 @@ def parts(qapp):
     }
 
 
-def make(parts):
+def make(parts, conversation_seconds=0):
+    # Conversation mode off by default: most tests check a single exchange.
     return AgentController(
         parts["stage"],
         parts["chat"],
@@ -108,6 +109,7 @@ def make(parts):
         exclusion=ExclusionPolicy(),
         foreground=lambda: parts["window"],
         quit_app=lambda: parts["opened"].append(True),
+        conversation_seconds=conversation_seconds,
         spawn=lambda work: work(),
         threaded_speech=False,
     )
@@ -459,3 +461,137 @@ def test_escape_mutes_the_rest_of_a_streamed_reply(parts):
 
     assert parts["speaker"].spoken == ["Primera frase larga."]
     assert parts["chat"].panel.bubbles()[-1].text() == "Primera frase larga. Segunda frase larga."
+
+
+class ScriptedRecorder:
+    """Returns the next audio in the list (None = nobody spoke) and logs each timeout."""
+
+    def __init__(self, *audios):
+        self.audios = list(audios)
+        self.timeouts = []
+
+    def record(self, start_timeout_seconds, cancel):
+        self.timeouts.append(start_timeout_seconds)
+        return self.audios.pop(0) if self.audios else None
+
+
+class ScriptedTranscriber:
+    def __init__(self, *texts):
+        self.texts = list(texts)
+
+    def transcribe(self, audio):
+        return self.texts.pop(0)
+
+
+def talk(parts, *texts):
+    parts["recorder"] = ScriptedRecorder(*[SPEECH] * len(texts))
+    parts["transcriber"] = ScriptedTranscriber(*texts)
+    return make(parts, conversation_seconds=8)
+
+
+def answer(controller, parts, text="Claro."):
+    order = parts["bus"].orders[-1]
+    controller.result_received(reply(order, text))
+
+
+def test_after_a_spoken_reply_paula_keeps_listening_without_wake_word(parts):
+    controller = talk(parts, "hola paula", "y mañana qué hago")
+    controller.wake_word_heard()
+    answer(controller, parts)
+
+    assert controller._follow_up_timer.isActive()
+    controller._follow_up()
+
+    _, second = parts["bus"].orders
+    assert second.text == "y mañana qué hago"
+    assert second.source is Source.VOICE
+    assert parts["recorder"].timeouts == [5, 8]  # follow-up waits the conversation time
+
+
+def test_silence_ends_the_conversation(parts):
+    controller = talk(parts, "hola paula")
+    controller.wake_word_heard()
+    answer(controller, parts)
+
+    controller._follow_up()  # nobody speaks
+
+    assert len(parts["bus"].orders) == 1
+    assert state(parts) is RobotState.SLEEPING
+    assert not parts["wake_detector"].paused
+    assert not controller._follow_up_timer.isActive()
+
+
+def test_goodbye_ends_the_conversation_without_asking_the_hub(parts):
+    controller = talk(parts, "hola paula", "gracias, Paula")
+    controller.wake_word_heard()
+    answer(controller, parts)
+
+    controller._follow_up()
+
+    assert len(parts["bus"].orders) == 1
+    assert parts["speaker"].spoken[-1] == "¡Hasta luego!"
+    assert state(parts) is RobotState.SLEEPING
+    assert not controller._follow_up_timer.isActive()
+
+
+def test_escape_between_reply_and_follow_up_ends_it(parts):
+    controller = talk(parts, "hola paula")
+    controller.wake_word_heard()
+    answer(controller, parts)
+
+    controller.escape_pressed()
+
+    assert not controller._follow_up_timer.isActive()
+    assert state(parts) is RobotState.SLEEPING
+
+
+def test_no_follow_up_in_an_excluded_app(parts):
+    controller = talk(parts, "hola paula")
+    controller.hotkey_pressed()
+    answer(controller, parts)
+    parts["window"] = WindowInfo("Discord.exe", "Chrome_WidgetWin_1", False)
+
+    controller._follow_up()
+
+    assert parts["recorder"].timeouts == [5]  # never opened the mic again
+    assert state(parts) is RobotState.SLEEPING
+
+
+def test_chat_orders_do_not_start_a_conversation(parts):
+    controller = talk(parts)
+    parts["chat"].panel.message_sent.emit("hola")
+    answer(controller, parts)
+
+    assert not controller._follow_up_timer.isActive()
+
+
+def test_question_ends_the_conversation(parts):
+    controller = talk(parts, "apaga el pc")
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+
+    controller.result_received(
+        Result(
+            id=order.id,
+            status=Status.QUESTION,
+            response_text="¿Confirmas?",
+            speak=True,
+            channel=Channel.PC,
+            robot_state=RobotState.QUESTION,
+            options=["Sí, confirmo", "No"],
+        )
+    )
+
+    assert not controller._follow_up_timer.isActive()
+    assert state(parts) is RobotState.QUESTION
+
+
+def test_sleep_cloud_ends_the_conversation(parts):
+    controller = talk(parts, "hola paula")
+    controller.wake_word_heard()
+    answer(controller, parts)
+
+    parts["stage"].cloud_picked.emit("sleep")
+    controller._follow_up()
+
+    assert parts["recorder"].timeouts == [5]

@@ -56,6 +56,7 @@ class Settings:
     wake_word_min_confidence: float
     hotkey: str
     hotkey_listen_seconds: int
+    conversation_seconds: float
     excluded_apps: str
     apps_file: Path | None
     models_dir: Path
@@ -74,8 +75,11 @@ class Settings:
             min_confidence = float(os.environ.get("WAKE_WORD_MIN_CONFIDENCE") or 0.85)
             listen_seconds = int(os.environ.get("HOTKEY_LISTEN_SECONDS") or 5)
             speed = float(os.environ.get("ELEVENLABS_SPEED") or 1.0)
+            conversation_seconds = float(os.environ.get("CONVERSATION_SECONDS") or 8)
         except ValueError as exc:
             raise SettingsError(f"Invalid number in .env: {exc}") from exc
+        if not 0 <= conversation_seconds <= 30:
+            raise SettingsError("CONVERSATION_SECONDS must be between 0 (off) and 30")
         if not 0.7 <= speed <= 1.2:
             raise SettingsError("ELEVENLABS_SPEED must be between 0.7 and 1.2")
         whisper_device = (os.environ.get("WHISPER_DEVICE") or "auto").lower()
@@ -97,6 +101,7 @@ class Settings:
             wake_word_min_confidence=min_confidence,
             hotkey=os.environ.get("HOTKEY", "ctrl+shift+p"),
             hotkey_listen_seconds=listen_seconds,
+            conversation_seconds=conversation_seconds,
             excluded_apps=os.environ.get("EXCLUDED_APPS", ""),
             apps_file=Path(apps_file) if apps_file else None,
             models_dir=Path(os.environ.get("MODELS_DIR") or _local_data() / "models"),
