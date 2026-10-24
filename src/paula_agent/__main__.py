@@ -67,7 +67,9 @@ def main() -> int:
     app.setQuitOnLastWindowClosed(False)
     stage, chat = StageWindow(), ChatWindow()
 
-    transcriber = Transcriber(settings.whisper_model, settings.whisper_language)
+    transcriber = Transcriber(
+        settings.whisper_model, settings.whisper_language, settings.whisper_device
+    )
     speaker = Speaker(
         settings.elevenlabs_api_key, settings.elevenlabs_voice_id, settings.elevenlabs_model
     )
