@@ -18,7 +18,6 @@ def test_normalize_drops_accents_and_punctuation():
         "hasta luego",
         "No, nada más",
         "No, gracias",
-        "Sí, gracias",
         "Gracias por la ayuda",
         "Muchas gracias por todo",
         "Hasta mañana",
@@ -37,6 +36,8 @@ def test_farewells(text):
         "abre Spotify y nada más",  # a request that happens to end in a farewell word
         "gracias, ahora abre la calculadora y dime cómo está el PC",
         "listos para jugar",
+        "Sí, gracias",  # accepts an offer from Paula
+        "vale, gracias",
     ],
 )
 def test_not_farewells(text):

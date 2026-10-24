@@ -7,6 +7,7 @@ each one is turned into a Qt signal so all state changes happen on the UI thread
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from collections.abc import Callable
 
@@ -255,7 +256,7 @@ class AgentController(QObject):
         self._follow_ups += 1
         self._following = True
         # Same banner as the hotkey: the mic is open again and Esc ends it.
-        self._countdown = int(self._conversation_seconds)
+        self._countdown = max(1, math.ceil(self._conversation_seconds))
         self._stage.show_listen(self._countdown)
         self._countdown_timer.start()
         self._listen(self._conversation, timeout_seconds=self._conversation_seconds)
@@ -422,8 +423,10 @@ class AgentController(QObject):
             self._end_conversation()
             if self._listening:
                 self._cancel.set()  # stop a follow-up recording too
-            elif not self._expected:
-                self._busy = False  # picked between a reply and its follow-up
+            elif not self._expected and not self._speaking:
+                # Picked between a reply and its follow-up. While Paula still speaks,
+                # `_on_spoken` brings her to idle instead.
+                self._busy = False
             self._asleep = True
             self._wake_detector.pause()
             self._chat.hide()

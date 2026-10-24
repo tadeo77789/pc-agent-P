@@ -27,15 +27,13 @@ FAREWELL_PHRASES = (
 )
 # Said on its own, these also end the conversation.
 FAREWELL_WORDS = ("listo", "nada")
+# Not "si", "vale" or "bueno": "sí, gracias" usually accepts an offer from Paula.
 FILLER_WORDS = frozenset(
     [
         "muchas",
         "paula",
         "port",
         "ok",
-        "vale",
-        "bueno",
-        "si",
         "no",
         "listo",
         "pues",

@@ -638,3 +638,17 @@ def test_follow_up_shows_the_listen_banner(parts):
 
     assert seen == [True]
     assert not parts["stage"].listen_visible
+
+
+def test_sleep_while_speaking_keeps_the_hotkey_off_until_spoken(parts):
+    controller = talk(parts, "hola paula", "otra cosa")
+    controller.wake_word_heard()
+    controller._speech = type(
+        "Silent", (), {"say": lambda s, t: None, "finish": lambda s: None, "stop": lambda s: None}
+    )()
+    answer(controller, parts)  # still speaking: no `_spoken` yet
+
+    parts["stage"].cloud_picked.emit("sleep")
+    controller.hotkey_pressed()
+
+    assert len(parts["bus"].orders) == 1  # mic not opened over Paula's voice
