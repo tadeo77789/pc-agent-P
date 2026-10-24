@@ -109,6 +109,7 @@ def make(parts):
         foreground=lambda: parts["window"],
         open_settings=lambda: parts["opened"].append(True),
         spawn=lambda work: work(),
+        threaded_speech=False,
     )
 
 
@@ -366,3 +367,93 @@ def test_chat_reply_while_transcribing_is_accepted(parts):
     assert parts["speaker"].spoken == ["Hecho."]
     assert state(parts) is RobotState.SLEEPING
     assert not controller._thinking_timer.isActive()
+
+
+def test_partials_are_spoken_as_they_arrive_and_not_repeated(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+
+    controller.result_received(reply(order, "Hola, Ola.", status=Status.PENDING, partial=True))
+    assert state(parts) is RobotState.SPEAKING
+    assert parts["speaker"].spoken == ["Hola, Ola."]
+    controller.result_received(reply(order, "Todo va bien.", status=Status.PENDING, partial=True))
+    controller.result_received(reply(order, "Hola, Ola. Todo va bien."))
+
+    assert parts["speaker"].spoken == ["Hola, Ola.", "Todo va bien."]
+    assert state(parts) is RobotState.SLEEPING
+    assistant_bubbles = [b.text() for b in parts["chat"].panel.bubbles() if b.role == "assistant"]
+    assert assistant_bubbles[-1] == "Hola, Ola. Todo va bien."
+    assert assistant_bubbles.count("Hola, Ola. Todo va bien.") == 1
+
+
+def test_final_error_after_partials_is_spoken(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+
+    controller.result_received(reply(order, "Claro, lo abro.", status=Status.PENDING, partial=True))
+    controller.result_received(
+        reply(order, "No pude abrirlo.", status=Status.ERROR, robot_state=RobotState.ANGRY)
+    )
+
+    assert parts["speaker"].spoken == ["Claro, lo abro.", "No pude abrirlo."]
+
+
+def test_late_partials_are_ignored(parts):
+    controller = make(parts)
+    parts["chat"].panel.message_sent.emit("hola")
+    order = parts["bus"].orders[0]
+    controller._no_reply()
+    bubbles = len(parts["chat"].panel.bubbles())
+
+    controller.result_received(reply(order, "Tarde.", status=Status.PENDING, partial=True))
+
+    assert len(parts["chat"].panel.bubbles()) == bubbles
+    assert parts["speaker"].spoken == []
+
+
+def partial(order, text):
+    return reply(order, text, status=Status.PENDING, partial=True)
+
+
+def test_final_with_line_breaks_is_not_repeated(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+
+    controller.result_received(partial(order, "Hola, Ola."))
+    controller.result_received(partial(order, "Todo va bien."))
+    controller.result_received(reply(order, "Hola, Ola.\n\nTodo va bien."))
+
+    assert parts["speaker"].spoken == ["Hola, Ola.", "Todo va bien."]
+
+
+def test_stream_state_is_cleared_after_timeout(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    first = parts["bus"].orders[0]
+    controller.result_received(partial(first, "Ya casi termino. Hecho."))
+    controller._no_reply()
+    assert state(parts) is RobotState.ANGRY
+    assert not controller._speaking
+
+    parts["chat"].panel.message_sent.emit("otra cosa")
+    second = parts["bus"].orders[-1]
+    controller.result_received(reply(second, "Hecho."))
+
+    assert parts["chat"].panel.bubbles()[-1].text() == "Hecho."
+
+
+def test_escape_mutes_the_rest_of_a_streamed_reply(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+    controller.result_received(partial(order, "Primera frase larga."))
+
+    controller.escape_pressed()
+    controller.result_received(partial(order, "Segunda frase larga."))
+    controller.result_received(reply(order, "Primera frase larga. Segunda frase larga."))
+
+    assert parts["speaker"].spoken == ["Primera frase larga."]
+    assert parts["chat"].panel.bubbles()[-1].text() == "Primera frase larga. Segunda frase larga."

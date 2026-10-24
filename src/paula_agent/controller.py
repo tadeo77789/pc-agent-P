@@ -14,6 +14,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from paula_agent.activation.foreground import ExclusionPolicy, WindowInfo
+from paula_agent.audio.speech_queue import SpeechQueue
 from paula_agent.messaging.messages import Action, Intent, Order, Result, Source, Status
 from paula_agent.ui.robot.states import RobotState
 from paula_agent.ui.window import ChatWindow, StageWindow
@@ -29,6 +30,11 @@ COMMANDS_TEXT = (
     "Puedo abrir: {apps}. También puedo revisar el estado del PC o apagarlo (te pido "
     "confirmación antes)."
 )
+
+
+def _normalize(text: str) -> str:
+    """Collapse whitespace: the hub strips sentences, the final text keeps line breaks."""
+    return " ".join(text.split())
 
 
 def spawn_thread(work: Callable[[], None]) -> None:
@@ -59,6 +65,7 @@ class AgentController(QObject):
         open_settings: Callable[[], None],
         listen_seconds: int = 5,
         spawn: Callable[[Callable[[], None]], None] = spawn_thread,
+        threaded_speech: bool = True,
     ) -> None:
         super().__init__()
         self._stage = stage
@@ -82,6 +89,11 @@ class AgentController(QObject):
         self._question_id: str | None = None
         # Result ids that answer the order in flight; anything else is a late reply.
         self._expected: set[str] = set()
+        # Sentences of the reply in flight that already arrived as partial results.
+        self._streamed = ""
+        self._stream_bubble = None
+        self._muted = False
+        self._speech = SpeechQueue(speaker, self._spoken.emit, threaded=threaded_speech)
         self._cancel = threading.Event()
         self._countdown = 0
 
@@ -144,7 +156,9 @@ class AgentController(QObject):
             self._cancel.set()
             self._end_countdown()
         elif self._speaking:
-            self._speaker.stop()
+            # Silence the rest of this reply too: later sentences only go to the chat.
+            self._muted = True
+            self._speech.stop()
 
     def _tick(self) -> None:
         self._countdown -= 1
@@ -221,6 +235,7 @@ class AgentController(QObject):
             # Saying something else drops the pending question.
             self._question_id = None
             self._chat.panel.clear_options()
+        self._reset_stream()
         self._busy = True
         self._idle_timer.stop()
         self._set_state(RobotState.THINKING)
@@ -230,13 +245,26 @@ class AgentController(QObject):
     # Replies from the hub
 
     def _on_result(self, result: Result) -> None:
-        self._chat.panel.add_message("assistant", result.response_text)
         if result.id not in self._expected:
             # Late reply (timed out or superseded): show it, but leave the state alone.
+            if not result.partial:
+                self._chat.panel.add_message("assistant", result.response_text)
+            return
+        self._idle_timer.stop()
+        if result.partial:
+            self._on_partial(result)
             return
         self._expected = set()
         self._thinking_timer.stop()
-        self._idle_timer.stop()
+
+        # Text already spoken sentence by sentence is not shown or said again. The final
+        # text is the last round's reply, so it is the tail of what was streamed.
+        final = _normalize(result.response_text)
+        streamed = bool(final) and self._streamed.endswith(final)
+        muted = self._muted
+        self._reset_stream()
+        if not streamed:
+            self._chat.panel.add_message("assistant", result.response_text)
 
         if result.status is Status.QUESTION and result.options:
             self._question_id = result.id
@@ -246,22 +274,31 @@ class AgentController(QObject):
         state = (
             RobotState.ANGRY if result.status is Status.ERROR else RobotState(result.robot_state)
         )
-        if result.speak and self._speaker.enabled:
+        if (result.speak and self._speaker.enabled and not muted) or self._speaking:
             # Keep the question or angry face while talking; otherwise the mouth moves.
             talking = state if state in (RobotState.QUESTION, RobotState.ANGRY) else None
             self._set_state(talking or RobotState.SPEAKING)
             self._speaking = True
-            self._spawn(lambda: self._speak(result.response_text))
+            if result.speak and not streamed and not muted:
+                self._speech.say(result.response_text)
+            self._speech.finish()
         else:
             self._flash(state)
 
-    def _speak(self, text: str) -> None:
-        try:
-            self._speaker.speak(text)
-        except Exception:
-            log.exception("Speaking failed")
-        finally:
-            self._spoken.emit()
+    def _on_partial(self, result: Result) -> None:
+        sentence = _normalize(result.response_text)
+        self._streamed = f"{self._streamed} {sentence}".strip()
+        if self._stream_bubble is None:
+            self._stream_bubble = self._chat.panel.add_message("assistant", sentence)
+        else:
+            self._stream_bubble.setText(self._streamed)
+        if self._speaker.enabled and not self._muted:
+            if not self._speaking:
+                self._speaking = True
+                self._set_state(RobotState.SPEAKING)
+            self._speech.say(sentence)
+        # The rest may take a while (a command running): keep watching for a hang.
+        self._thinking_timer.start()
 
     def _on_spoken(self) -> None:
         self._speaking = False
@@ -284,8 +321,15 @@ class AgentController(QObject):
 
     def _no_reply(self) -> None:
         self._expected = set()
+        self._reset_stream()
+        if self._speaking:
+            # Partials were spoken but the final never came: end the speech cleanly.
+            self._speech.stop()
         self._chat.panel.add_message("assistant", NO_REPLY_TEXT)
         self._flash(RobotState.ANGRY)
+
+    def _reset_stream(self) -> None:
+        self._streamed, self._stream_bubble, self._muted = "", None, False
 
     # Clouds and robot
 
