@@ -8,10 +8,7 @@ version = "0.1.0"
 description = "Paula Port PC agent: activation, voice, robot UI and whitelisted commands"
 readme = "README.md"
 requires-python = ">=3.11"
-# UI toolkit (PyQt or Tkinter) and hotkey library are still undecided; add them when chosen.
 dependencies = [
-    "elevenlabs",
-    "faster-whisper",
     "pika",
     "python-dotenv",
 ]
