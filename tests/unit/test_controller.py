@@ -622,6 +622,7 @@ def test_follow_ups_stop_at_the_cap(parts):
 
 
 def test_follow_up_shows_the_listen_banner(parts):
+    parts["stage"].show()
     controller = talk(parts, "hola paula")
     controller.wake_word_heard()
     answer(controller, parts)
