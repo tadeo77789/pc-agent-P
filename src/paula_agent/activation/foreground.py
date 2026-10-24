@@ -20,6 +20,8 @@ DEFAULT_EXCLUDED = (
 )
 # Desktop and shell windows cover the whole screen but are not games.
 SHELL_CLASSES = ("Progman", "WorkerW", "Shell_TrayWnd")
+GWL_STYLE = -16
+WS_CAPTION = 0x00C00000
 
 
 @dataclass(frozen=True)
@@ -86,10 +88,15 @@ def foreground_window() -> WindowInfo | None:
     monitor = user32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
     user32.GetMonitorInfoW(monitor, ctypes.byref(info))
     screen = info.rcMonitor
-    fullscreen = (
+    covers_screen = (
         rect.left <= screen.left
         and rect.top <= screen.top
         and rect.right >= screen.right
         and rect.bottom >= screen.bottom
     )
+    # A maximized normal window can also cover the monitor (auto-hide taskbar):
+    # games in fullscreen have no title bar and are not "zoomed".
+    style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+    has_caption = style & WS_CAPTION == WS_CAPTION
+    fullscreen = covers_screen and not has_caption and not user32.IsZoomed(hwnd)
     return WindowInfo(process=process, window_class=class_name.value, fullscreen=fullscreen)

@@ -93,16 +93,23 @@ class WakeWordDetector:
         recognizer = vosk.KaldiRecognizer(model, SAMPLE_RATE, grammar)
         recognizer.SetWords(True)
 
-        with sd.RawInputStream(
-            samplerate=SAMPLE_RATE, channels=1, dtype="int16", blocksize=4000, device=self._device
-        ) as stream:
-            while not self._stopping.is_set():
-                data, _ = stream.read(4000)
-                if self._paused.is_set():
-                    recognizer.Reset()
-                    continue
-                if recognizer.AcceptWaveform(bytes(data)):
-                    result = json.loads(recognizer.Result())
-                    if matches(result, self._wake_words, self._min_confidence):
-                        log.info("Wake word heard")
-                        self._on_wake()
+        while not self._stopping.is_set():
+            if self._paused.is_set():
+                # The mic stays closed while paused or asleep.
+                self._stopping.wait(0.2)
+                continue
+            recognizer.Reset()
+            with sd.RawInputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="int16",
+                blocksize=4000,
+                device=self._device,
+            ) as stream:
+                while not self._stopping.is_set() and not self._paused.is_set():
+                    data, _ = stream.read(4000)
+                    if recognizer.AcceptWaveform(bytes(data)):
+                        result = json.loads(recognizer.Result())
+                        if matches(result, self._wake_words, self._min_confidence):
+                            log.info("Wake word heard")
+                            self._on_wake()
