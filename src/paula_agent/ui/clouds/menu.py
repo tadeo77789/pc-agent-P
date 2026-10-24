@@ -151,7 +151,7 @@ class CloudMenu(QWidget):
         if corner.startswith("top"):
             y = robot.top() - GAP - button.height()
         else:
-            y = robot.bottom() + GAP
+            y = robot.bottom() + 1 + GAP  # QRect.bottom() is the last row, inclusive
         return QPoint(x, y)
 
     def _build_dots(self) -> None:
