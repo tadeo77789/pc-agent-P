@@ -85,7 +85,7 @@ def test_stage_clouds_toggle_and_pick(qapp):
     stage.robot.clicked.emit()
     assert stage.clouds.is_open
 
-    stage.clouds._buttons[0].click()
+    next(b for b in stage.clouds._buttons if b.cloud_id == "chat").click()
 
     assert picked == ["chat"]
     assert not stage.clouds.is_open
@@ -179,6 +179,8 @@ def test_clouds_hug_the_robot(qapp):
     robot = stage.robot.geometry()
 
     for button in stage.clouds._buttons:
+        if button.cloud_id == "settings":
+            continue  # sits above the two top clouds
         cloud = button.geometry()
         gap_x = max(robot.left() - cloud.right(), cloud.left() - robot.right(), 0)
         gap_y = max(robot.top() - cloud.bottom(), cloud.top() - robot.bottom(), 0)
@@ -247,3 +249,13 @@ def test_every_cloud_is_clickable_at_its_edges(qapp):
         for point in (cloud.topLeft(), cloud.topRight(), cloud.bottomLeft(), cloud.bottomRight()):
             inside = point + QPoint(6 if point.x() == cloud.left() else -6, 0)
             assert not stage.robot.geometry().contains(inside), button.cloud_id
+
+
+def test_settings_cloud_sits_above_the_top_clouds_inside_the_stage(qapp):
+    stage = StageWindow()
+    clouds = {b.cloud_id: b.geometry() for b in stage.clouds._buttons}
+
+    settings = clouds["settings"]
+    assert stage.rect().contains(settings)
+    assert settings.bottom() < min(clouds["chat"].top(), clouds["commands"].top())
+    assert not settings.intersects(clouds["chat"]) and not settings.intersects(clouds["commands"])

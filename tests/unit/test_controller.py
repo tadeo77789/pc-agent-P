@@ -652,3 +652,27 @@ def test_sleep_while_speaking_keeps_the_hotkey_off_until_spoken(parts):
     controller.hotkey_pressed()
 
     assert len(parts["bus"].orders) == 1  # mic not opened over Paula's voice
+
+
+def test_settings_cloud_opens_the_settings_window(parts):
+    opened = []
+    controller = AgentController(
+        parts["stage"],
+        parts["chat"],
+        bus=parts["bus"],
+        recorder=parts["recorder"],
+        transcriber=parts["transcriber"],
+        speaker=parts["speaker"],
+        runner=parts["runner"],
+        wake_detector=parts["wake_detector"],
+        exclusion=ExclusionPolicy(),
+        foreground=lambda: None,
+        quit_app=lambda: None,
+        open_settings=lambda: opened.append(True),
+        threaded_speech=False,
+    )
+
+    parts["stage"].cloud_picked.emit("settings")
+
+    assert opened == [True]
+    assert controller is not None

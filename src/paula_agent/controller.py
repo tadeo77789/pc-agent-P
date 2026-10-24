@@ -70,6 +70,7 @@ class AgentController(QObject):
         exclusion: ExclusionPolicy,
         foreground: Callable[[], WindowInfo | None],
         quit_app: Callable[[], None],
+        open_settings: Callable[[], None] = lambda: None,
         listen_seconds: int = 5,
         conversation_seconds: float = 8.0,
         spawn: Callable[[Callable[[], None]], None] = spawn_thread,
@@ -87,6 +88,7 @@ class AgentController(QObject):
         self._exclusion = exclusion
         self._foreground = foreground
         self._quit_app = quit_app
+        self._open_settings = open_settings
         self._listen_seconds = listen_seconds
         self._conversation_seconds = conversation_seconds
         self._spawn = spawn
@@ -415,6 +417,8 @@ class AgentController(QObject):
             apps = ", ".join(self._runner.app_names)
             self._chat.panel.add_message("assistant", COMMANDS_TEXT.format(apps=apps))
             self._chat.open_next_to(self._stage)
+        elif cloud_id == "settings":
+            self._open_settings()
         elif cloud_id == "quit":
             self._speech.stop()
             self._chat.hide()
