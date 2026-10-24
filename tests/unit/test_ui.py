@@ -1,4 +1,4 @@
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QPushButton
@@ -118,3 +118,69 @@ def test_bubbles_render_plain_text(qapp):
     panel.add_message("assistant", "<b>hola</b>")
 
     assert panel.bubbles()[-1].textFormat() == Qt.TextFormat.PlainText
+
+
+def temp_settings(tmp_path) -> QSettings:
+    return QSettings(str(tmp_path / "agent.ini"), QSettings.Format.IniFormat)
+
+
+def test_dragging_moves_the_stage_without_clicking(qapp, tmp_path):
+    stage = StageWindow(temp_settings(tmp_path))
+    stage.move(200, 200)
+    clicks = []
+    stage.robot.clicked.connect(lambda: clicks.append(1))
+    stage.clouds.open_menu()
+
+    stage.robot.drag_started.emit()
+    stage.robot.dragged.emit(QPoint(-40, -30))
+    stage.robot.drag_finished.emit()
+
+    assert stage.pos() == QPoint(160, 170)
+    assert not stage.clouds.is_open
+    assert clicks == []
+
+
+def test_small_press_movement_is_still_a_click(qapp):
+    robot = RobotWidget()
+    events = []
+    robot.clicked.connect(lambda: events.append("click"))
+    robot.drag_started.connect(lambda: events.append("drag"))
+
+    QTest.mousePress(robot, Qt.MouseButton.LeftButton, pos=QPoint(50, 50))
+    QTest.mouseMove(robot, QPoint(52, 51))
+    QTest.mouseRelease(robot, Qt.MouseButton.LeftButton, pos=QPoint(52, 51))
+
+    assert events == ["click"]
+
+
+def test_position_is_remembered(qapp, tmp_path):
+    stage = StageWindow(temp_settings(tmp_path))
+    stage.move(300, 250)
+    stage._save_position()
+
+    again = StageWindow(temp_settings(tmp_path))
+    again.place_in_corner()
+
+    assert again.pos() == QPoint(300, 250)
+
+
+def test_offscreen_position_falls_back_to_corner(qapp, tmp_path):
+    settings = temp_settings(tmp_path)
+    settings.setValue("stage/position", QPoint(-50_000, -50_000))
+
+    stage = StageWindow(settings)
+    stage.place_in_corner()
+
+    assert stage.pos() != QPoint(-50_000, -50_000)
+
+
+def test_clouds_hug_the_robot(qapp):
+    stage = StageWindow()
+    robot = stage.robot.geometry()
+
+    for button in stage.clouds._buttons:
+        cloud = button.geometry()
+        gap_x = max(robot.left() - cloud.right(), cloud.left() - robot.right(), 0)
+        gap_y = max(robot.top() - cloud.bottom(), cloud.top() - robot.bottom(), 0)
+        assert gap_x == 0, button.cloud_id  # overlaps the robot's column
+        assert gap_y <= 30, button.cloud_id

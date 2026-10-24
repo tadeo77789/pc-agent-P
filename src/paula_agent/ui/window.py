@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QSettings, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
@@ -13,6 +13,7 @@ from paula_agent.ui.robot.states import RobotState
 from paula_agent.ui.robot.widget import RobotWidget
 
 SCREEN_MARGIN = 16
+POSITION_KEY = "stage/position"
 FLOATING = (
     Qt.WindowType.FramelessWindowHint
     | Qt.WindowType.WindowStaysOnTopHint
@@ -25,10 +26,12 @@ class StageWindow(QWidget):
 
     cloud_picked = Signal(str)
 
-    def __init__(self) -> None:
+    def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__(None, FLOATING)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(*theme.STAGE_SIZE)
+        self._settings = settings or QSettings("PaulaPort", "agent")
+        self._drag_origin = QPoint()
 
         self.robot = RobotWidget(self)
         robot_w, robot_h = theme.ROBOT_SIZE
@@ -38,6 +41,9 @@ class StageWindow(QWidget):
         self.clouds.picked.connect(self.cloud_picked.emit)
         self.clouds.hovered.connect(self.robot.look_at)
         self.robot.clicked.connect(self.clouds.toggle)
+        self.robot.drag_started.connect(self._start_drag)
+        self.robot.dragged.connect(self._drag)
+        self.robot.drag_finished.connect(self._save_position)
         self.robot.raise_()
 
         self._listen = QLabel(self)
@@ -48,11 +54,33 @@ class StageWindow(QWidget):
         self._listen.hide()
 
     def place_in_corner(self) -> None:
+        """Where the user last left Paula, or the bottom-right corner."""
+        saved = self._settings.value(POSITION_KEY)
+        if isinstance(saved, QPoint) and self._robot_visible_at(saved):
+            self.move(saved)
+            return
         screen = QGuiApplication.primaryScreen().availableGeometry()
         self.move(
             screen.right() - self.width() - SCREEN_MARGIN,
             screen.bottom() - self.height() - SCREEN_MARGIN,
         )
+
+    def _robot_visible_at(self, pos: QPoint) -> bool:
+        # A monitor may have been unplugged since the position was saved.
+        robot = QRect(pos + self.robot.pos(), self.robot.size())
+        return any(s.availableGeometry().intersects(robot) for s in QGuiApplication.screens())
+
+    def _start_drag(self) -> None:
+        self.clouds.close_menu()
+        self._drag_origin = self.pos()
+
+    def _drag(self, offset: QPoint) -> None:
+        target = self._drag_origin + offset
+        if self._robot_visible_at(target):
+            self.move(target)
+
+    def _save_position(self) -> None:
+        self._settings.setValue(POSITION_KEY, self.pos())
 
     def set_state(self, state: RobotState | str) -> None:
         self.robot.set_state(state)

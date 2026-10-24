@@ -24,7 +24,13 @@ CLOUDS = (
     ("sleep", "🌙 Dormir", "bottom-right"),
 )
 STAGGER_MS = 80
-MARGIN = (10, 16, 22)  # side, top, bottom
+# Clouds hug the robot: each one overlaps the robot's column by OVERLAP pixels and
+# leaves GAP pixels above or below it, so the two dots still fit in between.
+OVERLAP = 22
+GAP = 8
+# The robot is painted inside its widget with this margin (left, top, right, bottom)
+# so it can grow on hover; clouds hug the painted body, not the widget.
+BODY_MARGIN = (15, 6, 13, 12)
 
 
 class CloudButton(QPushButton):
@@ -76,7 +82,8 @@ class CloudMenu(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setGeometry(parent.rect())
-        self._robot_rect = robot_rect
+        left, top, right, bottom = BODY_MARGIN
+        self._robot_rect = robot_rect.adjusted(left, top, -right, -bottom)
         self._open = False
         self._buttons: list[CloudButton] = []
         self._dots: list[Dot] = []
@@ -136,10 +143,15 @@ class CloudMenu(QWidget):
         self._animations.append(animation)
 
     def _corner_position(self, button: CloudButton, corner: str) -> QPoint:
-        side, top, bottom = MARGIN
-        w, h = self.width(), self.height()
-        x = side if corner.endswith("left") else w - side - button.width()
-        y = top if corner.startswith("top") else h - bottom - button.height()
+        robot = self._robot_rect
+        if corner.endswith("left"):
+            x = robot.left() + OVERLAP - button.width()
+        else:
+            x = robot.right() - OVERLAP
+        if corner.startswith("top"):
+            y = robot.top() - GAP - button.height()
+        else:
+            y = robot.bottom() + GAP
         return QPoint(x, y)
 
     def _build_dots(self) -> None:
@@ -147,7 +159,7 @@ class CloudMenu(QWidget):
         for button in self._buttons:
             cloud = button.geometry().center()
             start, end = cloud, center
-            for t, size in ((0.35, 10), (0.6, 6)):
+            for t, size in ((0.3, 8), (0.42, 5)):
                 x = start.x() + (end.x() - start.x()) * t
                 y = start.y() + (end.y() - start.y()) * t
                 dot = Dot(size, self)
