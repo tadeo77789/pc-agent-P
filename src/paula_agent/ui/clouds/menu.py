@@ -1,0 +1,156 @@
+"""The four clouds that pop around Paula when she is clicked."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPoint,
+    QPropertyAnimation,
+    QRect,
+    Qt,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QPushButton, QWidget
+
+from paula_agent.ui import theme
+
+# (id, label, corner); labels are user-facing, in Spanish
+CLOUDS = (
+    ("chat", "💬 Abrir chat", "top-left"),
+    ("commands", "⚡ Ver comandos", "top-right"),
+    ("settings", "⚙️ Configuración", "bottom-left"),
+    ("sleep", "🌙 Dormir", "bottom-right"),
+)
+STAGGER_MS = 80
+MARGIN = (10, 16, 22)  # side, top, bottom
+
+
+class CloudButton(QPushButton):
+    hovered = Signal(object)  # global center QPoint, or None on leave
+
+    def __init__(self, cloud_id: str, label: str, parent: QWidget) -> None:
+        super().__init__(label, parent)
+        self.cloud_id = cloud_id
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: {theme.CLOUD_BG}; color: {theme.CLOUD_TEXT};
+                border: none; border-radius: 18px; padding: 10px 16px;
+                font-family: '{theme.FONT_FAMILY}'; font-size: 13px;
+            }}
+            QPushButton:hover {{ background: {theme.CLOUD_HOVER}; color: white; }}
+            """
+        )
+        shadow = QGraphicsDropShadowEffect(self, blurRadius=16, offset=QPoint(0, 6))
+        shadow.setColor(QColor(0, 0, 0, 56))
+        self.setGraphicsEffect(shadow)
+        self.adjustSize()
+
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self.hovered.emit(self.mapToGlobal(self.rect().center()))
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self.hovered.emit(None)
+
+
+class Dot(QWidget):
+    def __init__(self, size: int, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setStyleSheet(f"background: white; border-radius: {size // 2}px;")
+
+
+class CloudMenu(QWidget):
+    """Overlay the size of the stage. Emits `picked(cloud_id)`."""
+
+    picked = Signal(str)
+    hovered = Signal(object)
+
+    def __init__(self, parent: QWidget, robot_rect: QRect) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setGeometry(parent.rect())
+        self._robot_rect = robot_rect
+        self._open = False
+        self._buttons: list[CloudButton] = []
+        self._dots: list[Dot] = []
+        self._animations: list[QPropertyAnimation] = []
+        for cloud_id, label, corner in CLOUDS:
+            button = CloudButton(cloud_id, label, self)
+            button.move(self._corner_position(button, corner))
+            button.clicked.connect(lambda _=False, c=cloud_id: self._pick(c))
+            button.hovered.connect(self.hovered.emit)
+            button.hide()
+            self._buttons.append(button)
+        self._build_dots()
+        self.hide()
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
+    def toggle(self) -> None:
+        self.close_menu() if self.is_open else self.open_menu()
+
+    def open_menu(self) -> None:
+        self._open = True
+        self.show()
+        self.raise_()
+        for dot in self._dots:
+            dot.show()
+        for i, button in enumerate(self._buttons):
+            QTimer.singleShot(i * STAGGER_MS, lambda b=button: self._pop(b))
+
+    def close_menu(self) -> None:
+        self._open = False
+        for animation in self._animations:
+            animation.stop()
+        self._animations.clear()
+        for widget in (*self._buttons, *self._dots):
+            widget.hide()
+        self.hide()
+        self.hovered.emit(None)
+
+    def _pick(self, cloud_id: str) -> None:
+        self.close_menu()
+        self.picked.emit(cloud_id)
+
+    def _pop(self, button: CloudButton) -> None:
+        if not self.is_open:
+            return
+        end = button.geometry()
+        start = QRect(end.center(), end.size() * 0.4)
+        start.moveCenter(end.center())
+        animation = QPropertyAnimation(button, b"geometry", self, duration=350)
+        animation.setStartValue(start)
+        animation.setEndValue(end)
+        animation.setEasingCurve(QEasingCurve.Type.OutBack)
+        button.show()
+        animation.start()
+        self._animations.append(animation)
+
+    def _corner_position(self, button: CloudButton, corner: str) -> QPoint:
+        side, top, bottom = MARGIN
+        w, h = self.width(), self.height()
+        x = side if corner.endswith("left") else w - side - button.width()
+        y = top if corner.startswith("top") else h - bottom - button.height()
+        return QPoint(x, y)
+
+    def _build_dots(self) -> None:
+        center = self._robot_rect.center()
+        for button in self._buttons:
+            cloud = button.geometry().center()
+            start, end = cloud, center
+            for t, size in ((0.35, 10), (0.6, 6)):
+                x = start.x() + (end.x() - start.x()) * t
+                y = start.y() + (end.y() - start.y()) * t
+                dot = Dot(size, self)
+                dot.move(int(x - size / 2), int(y - size / 2))
+                dot.hide()
+                self._dots.append(dot)
