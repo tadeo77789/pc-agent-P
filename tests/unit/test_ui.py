@@ -223,16 +223,6 @@ def test_second_click_on_paula_closes_the_clouds(qapp):
     assert not stage.clouds.is_open
 
 
-def test_click_beside_the_clouds_closes_them(qapp):
-    stage = StageWindow()
-    stage.show()
-    stage.clouds.open_menu()
-
-    QTest.mouseClick(stage.clouds, Qt.MouseButton.LeftButton, pos=QPoint(2, 2))
-
-    assert not stage.clouds.is_open
-
-
 def test_chat_stays_on_screen_when_paula_is_top_left(qapp, tmp_path):
     stage = StageWindow(temp_settings(tmp_path))
     area = QGuiApplication.primaryScreen().availableGeometry()
@@ -245,3 +235,15 @@ def test_chat_stays_on_screen_when_paula_is_top_left(qapp, tmp_path):
     chat.open_next_to(stage)
 
     assert area.contains(chat.geometry())
+
+
+def test_every_cloud_is_clickable_at_its_edges(qapp):
+    stage = StageWindow()
+    stage.show()
+    stage.clouds.open_menu()
+
+    for button in stage.clouds._buttons:
+        cloud = button.geometry()
+        for point in (cloud.topLeft(), cloud.topRight(), cloud.bottomLeft(), cloud.bottomRight()):
+            inside = point + QPoint(6 if point.x() == cloud.left() else -6, 0)
+            assert not stage.robot.geometry().contains(inside), button.cloud_id

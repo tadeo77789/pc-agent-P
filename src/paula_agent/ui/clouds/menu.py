@@ -27,7 +27,7 @@ STAGGER_MS = 80
 # Clouds hug the robot: each one overlaps the robot's column by OVERLAP pixels and
 # leaves GAP pixels above or below it, so the two dots still fit in between.
 OVERLAP = 22
-GAP = 8
+GAP = 12  # at least BODY_MARGIN's bottom, so no cloud sits under the robot widget
 # The robot is painted inside its widget with this margin (left, top, right, bottom)
 # so it can grow on hover; clouds hug the painted body, not the widget.
 BODY_MARGIN = (15, 6, 13, 12)
@@ -123,10 +123,6 @@ class CloudMenu(QWidget):
             widget.hide()
         self.hide()
         self.hovered.emit(None)
-
-    def mousePressEvent(self, event) -> None:
-        # A click on the empty space around Paula closes the clouds.
-        self.close_menu()
 
     def _pick(self, cloud_id: str) -> None:
         self.close_menu()
