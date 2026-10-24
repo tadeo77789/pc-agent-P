@@ -78,3 +78,27 @@ def test_failed_copy_leaves_no_partial_file(folder, tmp_path, monkeypatch):
         folder.add([source(tmp_path, "guia.md")])
 
     assert list(folder.path.iterdir()) == []
+
+
+def test_copy_never_overwrites_even_on_a_late_collision(folder, tmp_path, monkeypatch):
+    import paula_agent.config.knowledge_folder as module
+
+    real = module.shutil.copyfile
+
+    def copy_then_collide(src, dst):
+        real(src, dst)
+        (folder.path / "guia.md").write_text("de otro", encoding="utf-8")  # appears mid-copy
+
+    monkeypatch.setattr(module.shutil, "copyfile", copy_then_collide)
+    added, _ = folder.add([source(tmp_path, "guia.md", "mio")])
+
+    assert added == ["guia (2).md"]
+    assert (folder.path / "guia.md").read_text(encoding="utf-8") == "de otro"
+
+
+def test_stale_partial_files_are_cleaned(folder):
+    folder.path.mkdir(parents=True)
+    (folder.path / "guia.pdf.partial").write_text("medio", encoding="utf-8")
+
+    assert folder.files() == []
+    assert not (folder.path / "guia.pdf.partial").exists()

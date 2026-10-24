@@ -115,6 +115,9 @@ class SettingsWindow(QWidget):
         self._open_meter = open_meter
         self._play_tone = play_tone
         self._meter: LevelMeter | None = None
+        # True while documents are being copied; __main__ then reuses this window instead
+        # of deleting it under the running copy.
+        self.copying = False
 
         tabs = QTabWidget(self)
         tabs.addTab(self._audio_tab(list_devices), "Audio")
@@ -309,20 +312,27 @@ class SettingsWindow(QWidget):
         if not sources:
             return
         self.add_button.setEnabled(False)
+        self.copying = True
         self.error.setText("Copiando…")
 
         def work() -> None:
             # Off the UI thread: a big PDF or a network share must not freeze Paula.
+            result: object = OSError("not copied")
             try:
                 result = self._knowledge.add(sources)
-            except OSError as exc:
+            except Exception as exc:
                 log.exception("Could not copy documents")
                 result = exc
-            self._copied.emit(result)
+            finally:
+                try:
+                    self._copied.emit(result)  # queued to the GUI thread
+                except RuntimeError:
+                    pass  # the window was deleted meanwhile; the files are copied anyway
 
         self._run(work)
 
     def _on_copied(self, result) -> None:
+        self.copying = False
         self.add_button.setEnabled(True)
         if isinstance(result, Exception):
             self.error.setText("No pude copiar todos los archivos a la carpeta de conocimiento.")

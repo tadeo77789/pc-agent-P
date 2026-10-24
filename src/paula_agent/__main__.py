@@ -105,6 +105,10 @@ def main() -> int:
         nonlocal settings_window
         # Built fresh each time: devices plugged in since, current memory, and no
         # leftover edits from a cancelled visit.
+        if settings_window is not None and settings_window.copying:
+            settings_window.show()
+            settings_window.raise_()
+            return
         if settings_window is not None:
             settings_window.close()
             settings_window.deleteLater()

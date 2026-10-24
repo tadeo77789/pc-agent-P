@@ -17,6 +17,11 @@ MAX_FILE_BYTES = 20_000_000
 MAX_DEPTH = 8
 
 
+def _is_link(path: Path) -> bool:
+    # Path.is_junction only exists since Python 3.12.
+    return path.is_symlink() or bool(getattr(path, "is_junction", lambda: False)())
+
+
 def default_knowledge_dir() -> Path:
     """Documents\\Paula\\Conocimiento, the same default as the hub."""
     return (
@@ -36,13 +41,10 @@ class KnowledgeFolder:
             here = Path(root)
             depth = len(here.relative_to(self.path).parts)
             # Like the hub: never follow junctions or symlinks, nor go too deep.
-            dirs[:] = [
-                d
-                for d in dirs
-                if depth < MAX_DEPTH
-                and not (here / d).is_symlink()
-                and not (here / d).is_junction()
-            ]
+            dirs[:] = [d for d in dirs if depth < MAX_DEPTH and not _is_link(here / d)]
+            for name in names:
+                if name.endswith(".partial"):  # left by a copy cut short (Paula closed)
+                    (here / name).unlink(missing_ok=True)
             found += [
                 (here / n).relative_to(self.path).as_posix()
                 for n in names
@@ -73,9 +75,10 @@ class KnowledgeFolder:
             target = self.path / source.name
             while True:
                 try:
-                    # A hard link fails if the name exists, so nothing is ever overwritten,
-                    # even if a file with that name appeared during the copy.
-                    os.link(partial, target)
+                    # On Windows a rename fails if the name exists, so nothing is ever
+                    # overwritten, even if that name appeared during the copy. Unlike a hard
+                    # link it also works on FAT32/exFAT drives.
+                    os.rename(partial, target)
                     return target.name
                 except FileExistsError:
                     target = self.path / f"{source.stem} ({n}){source.suffix}"
