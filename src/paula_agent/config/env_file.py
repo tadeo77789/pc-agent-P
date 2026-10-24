@@ -9,12 +9,22 @@ from pathlib import Path
 _LINE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=")
 
 
+def _line(key: str, value: str) -> str:
+    # Single quotes: python-dotenv takes the value literally (no "#" comments, no ${VAR}
+    # expansion); only backslash and the quote itself need escaping.
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+    return f"{key}='{escaped}'"
+
+
 def update_env(path: Path, values: dict[str, str]) -> None:
     for key, value in values.items():
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
             raise ValueError(f"Invalid setting name: {key}")
-        if "\n" in value or "\r" in value:
+        # Any line separator (\n, \r,  ...) would let a value start a new key line.
+        if len(f"x{value}x".splitlines()) != 1:
             raise ValueError(f"{key} cannot contain line breaks")
+        if "${" in value:  # python-dotenv expands ${VAR} even inside quotes
+            raise ValueError(f"{key} cannot contain ${{")
 
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     pending = dict(values)
@@ -22,8 +32,8 @@ def update_env(path: Path, values: dict[str, str]) -> None:
         match = _LINE.match(line)
         if match and match.group(1) in pending:
             key = match.group(1)
-            lines[i] = f"{key}={pending.pop(key)}"
-    lines.extend(f"{key}={value}" for key, value in pending.items())
+            lines[i] = _line(key, pending.pop(key))
+    lines.extend(_line(key, value) for key, value in pending.items())
 
     # Write next to the file and swap, so a crash never leaves a half-written .env.
     tmp = path.with_suffix(path.suffix + ".tmp")
