@@ -111,6 +111,7 @@ class AgentController(QObject):
         self._spoken.connect(self._on_spoken)
         stage.cloud_picked.connect(self._on_cloud)
         stage.robot.clicked.connect(self._on_robot_clicked)
+        stage.robot.drag_finished.connect(self._follow_chat)
         chat.panel.message_sent.connect(self._on_chat_message)
         chat.panel.option_chosen.connect(self._on_option)
 
@@ -347,6 +348,10 @@ class AgentController(QObject):
             self._wake_detector.pause()
             self._chat.hide()
             self._set_state(RobotState.SLEEPING)
+
+    def _follow_chat(self) -> None:
+        if self._chat.isVisible():
+            self._chat.open_next_to(self._stage)
 
     def _on_robot_clicked(self) -> None:
         if self._asleep:

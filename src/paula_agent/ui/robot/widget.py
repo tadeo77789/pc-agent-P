@@ -15,6 +15,9 @@ BLINK_MS = 120
 TALK_MS = 300
 
 
+DRAG_THRESHOLD = 6  # pixels the mouse must move before a press becomes a drag
+
+
 def _quad(start, control, end) -> QPainterPath:
     path = QPainterPath(QPointF(*start))
     path.quadTo(QPointF(*control), QPointF(*end))
@@ -23,11 +26,17 @@ def _quad(start, control, end) -> QPainterPath:
 
 class RobotWidget(QWidget):
     clicked = Signal()
+    # Dragging Paula moves her window; a short press is still a click.
+    drag_started = Signal()
+    dragged = Signal(QPoint)  # offset from where the press started
+    drag_finished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedSize(*theme.ROBOT_SIZE)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._press: QPoint | None = None
+        self._dragging = False
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._state = RobotState.SLEEPING
         self._hover = False
@@ -110,9 +119,31 @@ class RobotWidget(QWidget):
         self._hover = False
         self.update()
 
-    def mouseReleaseEvent(self, event) -> None:
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            self._press = event.globalPosition().toPoint()
+            self._dragging = False
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._press is None:
+            return
+        delta = event.globalPosition().toPoint() - self._press
+        if not self._dragging and delta.manhattanLength() < DRAG_THRESHOLD:
+            return
+        if not self._dragging:
+            self._dragging = True
+            self.drag_started.emit()
+        self.dragged.emit(delta)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._dragging:
+            self.drag_finished.emit()
+        else:
             self.clicked.emit()
+        self._press = None
+        self._dragging = False
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
