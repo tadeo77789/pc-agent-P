@@ -186,7 +186,8 @@ class AgentController(QObject):
         self._listening = False
         self._end_countdown()
         if self._cancel.is_set() or not text.strip():
-            if not self._expected:  # a chat order may have replaced this recording
+            # A chat order may have replaced this recording and even been answered already.
+            if not self._expected and not self._speaking and not self._idle_timer.isActive():
                 self._idle()
             return
         self._chat.panel.add_message("user", text)
@@ -230,7 +231,7 @@ class AgentController(QObject):
 
     def _on_result(self, result: Result) -> None:
         self._chat.panel.add_message("assistant", result.response_text)
-        if result.id not in self._expected or self._listening:
+        if result.id not in self._expected:
             # Late reply (timed out or superseded): show it, but leave the state alone.
             return
         self._expected = set()

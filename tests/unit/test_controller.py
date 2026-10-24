@@ -347,3 +347,22 @@ def test_speaker_exception_returns_to_idle(parts):
 
     assert state(parts) is RobotState.SLEEPING
     assert not parts["wake_detector"].paused
+
+
+def test_chat_reply_while_transcribing_is_accepted(parts):
+    controller = make(parts)
+
+    class ChattyTranscriber:
+        def transcribe(self, audio):
+            # The user types while Whisper works, and the hub answers right away.
+            parts["chat"].panel.message_sent.emit("mejor por chat")
+            controller.result_received(reply(parts["bus"].orders[-1], "Hecho."))
+            return "texto de voz"
+
+    controller._transcriber = ChattyTranscriber()
+    controller.wake_word_heard()
+
+    assert [o.source for o in parts["bus"].orders] == [Source.CHAT]
+    assert parts["speaker"].spoken == ["Hecho."]
+    assert state(parts) is RobotState.SLEEPING
+    assert not controller._thinking_timer.isActive()
