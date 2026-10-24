@@ -12,7 +12,16 @@ import pytest
 
 from paula_agent.messaging import topology
 from paula_agent.messaging.bus import AgentBus
-from paula_agent.messaging.messages import Action, Intent, Order, Source
+from paula_agent.messaging.messages import (
+    Action,
+    Channel,
+    Intent,
+    Order,
+    Result,
+    RobotState,
+    Source,
+    Status,
+)
 from paula_agent.messaging.signing import sign, verify
 
 URL = os.environ.get("RABBITMQ_URL", "amqp://paula:paula@localhost:5672/")
@@ -83,6 +92,32 @@ def test_agent_receives_signed_action_and_publishes_order():
             return json.loads(payload)["payload"]["text"] == "hola"
 
         assert wait_for(got_order, timeout=5)
+        connection.close()
+    finally:
+        bus.stop()
+
+
+def test_two_results_with_the_same_id_both_arrive():
+    """A confirmation sends the question and the final reply under one order id."""
+    results = []
+    bus = AgentBus(
+        URL, SECRET, on_result=results.append, on_action=lambda a: None, reconnect_delay=0.5
+    )
+    bus.start()
+    try:
+        connection = pika.BlockingConnection(pika.URLParameters(URL))
+        channel = connection.channel()
+        topology.declare(channel)
+        for text, status in (("¿Confirmas?", Status.QUESTION), ("Apagando.", Status.OK)):
+            result = Result("order-a", status, text, True, Channel.PC, RobotState.SPEAKING)
+            body = json.dumps(result.to_dict()).encode()
+            channel.basic_publish(
+                topology.EXCHANGE,
+                topology.RESULT_KEY,
+                body,
+                pika.BasicProperties(headers=sign(SECRET, body)),
+            )
+        assert wait_for(lambda: len(results) == 2, timeout=5)
         connection.close()
     finally:
         bus.stop()

@@ -46,7 +46,6 @@ class AgentBus:
         self._reconnect_delay = reconnect_delay
         # Actions are remembered on disk so a captured shutdown cannot be replayed later.
         self._seen_actions = SeenIds(path=seen_actions_path)
-        self._seen_results = SeenIds()
         self._connection: BlockingConnection | None = None
         self._channel: BlockingChannel | None = None
         self._buffer: deque[tuple[str, bytes]] = deque(maxlen=MAX_BUFFERED)
@@ -131,9 +130,9 @@ class AgentBus:
         channel = connection.channel()
         topology.declare(channel)
         channel.basic_qos(prefetch_count=1)
-        channel.basic_consume(
-            "agent.results", self._handler(Result.from_dict, self._on_result, self._seen_results)
-        )
+        # Results are not de-duplicated: a confirmation sends two results under the same
+        # order id (the question and the final reply), and results only touch the UI.
+        channel.basic_consume("agent.results", self._handler(Result.from_dict, self._on_result))
         channel.basic_consume(
             "agent.actions", self._handler(Action.from_dict, self._on_action, self._seen_actions)
         )
@@ -155,7 +154,7 @@ class AgentBus:
             if connection.is_open:
                 connection.close()
 
-    def _handler(self, parse, callback, seen: SeenIds):
+    def _handler(self, parse, callback, seen: SeenIds | None = None):
         def on_message(channel, method, properties, body: bytes) -> None:
             # Ack first: a redelivered action (e.g. shutdown) must never run twice.
             channel.basic_ack(method.delivery_tag)
@@ -165,7 +164,7 @@ class AgentBus:
             except (InvalidSignature, ValueError, KeyError, TypeError, AttributeError) as exc:
                 log.warning("Dropping invalid message on %s: %s", method.routing_key, exc)
                 return
-            if not seen.add(message.id):
+            if seen is not None and not seen.add(message.id):
                 log.warning("Dropping replayed message %s", message.id)
                 return
             try:
