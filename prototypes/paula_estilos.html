@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paula - Estilos</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #a68a64; padding: 30px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; justify-items: center; }
+  .item { text-align: center; color: #3b2e1c; font-weight: bold; font-size: 13px; }
+  .item svg { width: 130px; height: 108px; display: block; margin: 0 auto 8px; filter: drop-shadow(0 6px 12px rgba(0,0,0,.3)); }
+  .blink { animation: blink 4s infinite; transform-box: fill-box; transform-origin: center; }
+  @keyframes blink { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+  .mouth-talk { animation: talk .3s infinite alternate; transform-box: fill-box; transform-origin: center; }
+  @keyframes talk { from { transform: scaleY(1); } to { transform: scaleY(.4); } }
+</style>
+</head>
+<body>
+
+<div class="item">
+  <svg viewBox="0 0 120 100">
+    <rect x="22" y="6" width="76" height="10" rx="3" fill="#1f1f1f"/>
+    <rect x="14" y="14" width="92" height="74" rx="8" fill="#1f1f1f"/>
+    <rect x="8" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="104" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="18" y="20" width="84" height="62" rx="6" fill="#4B5563"/>
+    <rect x="26" y="27" width="68" height="48" rx="4" fill="#111827"/>
+    <path d="M38 52 Q46 58 54 52" stroke="#22d3ee" stroke-width="3" fill="none"/>
+    <path d="M66 52 Q74 58 82 52" stroke="#22d3ee" stroke-width="3" fill="none"/>
+    <rect x="50" y="64" width="20" height="3" fill="#22d3ee"/>
+  </svg>
+  Dormida
+</div>
+
+<div class="item">
+  <svg viewBox="0 0 120 100">
+    <rect x="22" y="6" width="76" height="10" rx="3" fill="#1f1f1f"/>
+    <rect x="14" y="14" width="92" height="74" rx="8" fill="#1f1f1f"/>
+    <rect x="8" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="104" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="18" y="20" width="84" height="62" rx="6" fill="#2563EB"/>
+    <rect x="26" y="27" width="68" height="48" rx="4" fill="#111827"/>
+    <rect class="blink" x="40" y="42" width="10" height="14" fill="#22d3ee"/>
+    <rect class="blink" x="70" y="42" width="10" height="14" fill="#22d3ee"/>
+    <rect x="56" y="62" width="8" height="6" rx="2" fill="#22d3ee"/>
+  </svg>
+  Escuchando
+</div>
+
+<div class="item">
+  <svg viewBox="0 0 120 100">
+    <rect x="22" y="6" width="76" height="10" rx="3" fill="#1f1f1f"/>
+    <rect x="14" y="14" width="92" height="74" rx="8" fill="#1f1f1f"/>
+    <rect x="8" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="104" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="18" y="20" width="84" height="62" rx="6" fill="#EA580C"/>
+    <rect x="26" y="27" width="68" height="48" rx="4" fill="#111827"/>
+    <rect class="blink" x="36" y="40" width="10" height="12" fill="#fb923c"/>
+    <rect class="blink" x="66" y="40" width="10" height="12" fill="#fb923c"/>
+    <path d="M46 66 Q52 62 58 66 T70 66" stroke="#fb923c" stroke-width="3" fill="none"/>
+  </svg>
+  Pensando
+</div>
+
+<div class="item">
+  <svg viewBox="0 0 120 100">
+    <rect x="22" y="6" width="76" height="10" rx="3" fill="#1f1f1f"/>
+    <rect x="14" y="14" width="92" height="74" rx="8" fill="#1f1f1f"/>
+    <rect x="8" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="104" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="18" y="20" width="84" height="62" rx="6" fill="#059669"/>
+    <rect x="26" y="27" width="68" height="48" rx="4" fill="#111827"/>
+    <path d="M38 50 Q45 40 52 50" stroke="#34d399" stroke-width="3" fill="none"/>
+    <path d="M68 50 Q75 40 82 50" stroke="#34d399" stroke-width="3" fill="none"/>
+    <path class="mouth-talk" d="M44 62 Q60 76 76 62 Z" fill="#34d399"/>
+  </svg>
+  Hablando
+</div>
+
+<div class="item">
+  <svg viewBox="0 0 120 100">
+    <rect x="22" y="6" width="76" height="10" rx="3" fill="#1f1f1f"/>
+    <rect x="14" y="14" width="92" height="74" rx="8" fill="#1f1f1f"/>
+    <rect x="8" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="104" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="18" y="20" width="84" height="62" rx="6" fill="#7C3AED"/>
+    <rect x="26" y="27" width="68" height="48" rx="4" fill="#111827"/>
+    <rect class="blink" x="40" y="42" width="10" height="12" fill="#c4b5fd"/>
+    <rect class="blink" x="70" y="40" width="10" height="14" fill="#c4b5fd"/>
+    <path d="M68 36 L82 34" stroke="#c4b5fd" stroke-width="3"/>
+    <ellipse cx="60" cy="66" rx="4" ry="3" fill="#c4b5fd"/>
+  </svg>
+  Pregunta
+</div>
+
+<div class="item">
+  <svg viewBox="0 0 120 100">
+    <rect x="22" y="6" width="76" height="10" rx="3" fill="#1f1f1f"/>
+    <rect x="14" y="14" width="92" height="74" rx="8" fill="#1f1f1f"/>
+    <rect x="8" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="104" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="18" y="20" width="84" height="62" rx="6" fill="#B91C1C"/>
+    <rect x="26" y="27" width="68" height="48" rx="4" fill="#111827"/>
+    <path d="M34 40 L54 48" stroke="#ef4444" stroke-width="4"/>
+    <path d="M86 40 L66 48" stroke="#ef4444" stroke-width="4"/>
+    <rect x="40" y="48" width="10" height="8" fill="#ef4444"/>
+    <rect x="70" y="48" width="10" height="8" fill="#ef4444"/>
+    <path d="M46 72 Q60 62 74 72" stroke="#ef4444" stroke-width="3" fill="none"/>
+  </svg>
+  Molesta
+</div>
+
+</body>
+</html>

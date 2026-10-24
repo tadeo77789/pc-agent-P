@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paula</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #a68a64;
+    display: flex; align-items: center; justify-content: center; overflow: hidden; }
+
+  .stage { position: relative; width: 420px; height: 360px; }
+
+  /* Robot centrado */
+  .robot { position: absolute; left: 50%; top: 50%; width: 130px; height: 108px; margin: -54px 0 0 -65px;
+    cursor: pointer; transition: transform .25s; filter: drop-shadow(0 6px 12px rgba(0,0,0,.3)); z-index: 5; }
+  .robot:hover { transform: scale(1.06); }
+  .blink { animation: blink 4s infinite; transform-box: fill-box; transform-origin: center; }
+  @keyframes blink { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+  .mouth-talk { animation: talk .3s infinite alternate; transform-box: fill-box; transform-origin: center; }
+  @keyframes talk { from { transform: scaleY(1); } to { transform: scaleY(.4); } }
+  .shake { animation: shake .4s; }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+  .eyes-group { transition: transform .12s; }
+
+  /* Nubes */
+  .cloud { position: absolute; z-index: 4; background: #fff; border: none; border-radius: 40px; padding: 10px 16px;
+    font-size: 13px; color: #1f2937; cursor: pointer; white-space: nowrap; box-shadow: 0 6px 16px rgba(0,0,0,.22);
+    opacity: 0; transform: scale(.4); pointer-events: none; transition: opacity .3s, transform .35s cubic-bezier(.34,1.56,.64,1), background .15s, color .15s; }
+  .cloud::before, .cloud::after { content: ""; position: absolute; background: #fff; border-radius: 50%; z-index: -1; }
+  .cloud::before { width: 24px; height: 24px; left: 12px; top: -12px; }
+  .cloud::after { width: 16px; height: 16px; right: 14px; bottom: -8px; }
+  .stage.show .cloud { opacity: 1; transform: scale(1); pointer-events: all; }
+  .stage.show .cloud:nth-of-type(1) { transition-delay: 0s; }
+  .stage.show .cloud:nth-of-type(2) { transition-delay: .08s; }
+  .stage.show .cloud:nth-of-type(3) { transition-delay: .16s; }
+  .stage.show .cloud:nth-of-type(4) { transition-delay: .24s; }
+  .cloud:hover, .cloud.hovered { background: #3B82F6; color: #fff; }
+  .cloud:hover::before, .cloud:hover::after, .cloud.hovered::before, .cloud.hovered::after { background: #3B82F6; }
+  .c1 { left: 10px;  top: 16px; }
+  .c2 { right: 10px; top: 16px; }
+  .c3 { left: 10px;  bottom: 22px; }
+  .c4 { right: 10px; bottom: 22px; }
+
+  .trail { position: absolute; z-index: 3; background: #fff; border-radius: 50%; opacity: 0; transition: opacity .3s; }
+  .stage.show .trail { opacity: 1; }
+
+  /* Chat flotante */
+  .chat { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 320px; height: 280px; background: #fff;
+    border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.3); display: none; flex-direction: column; overflow: hidden; z-index: 10; }
+  .chat.open { display: flex; }
+  .chat-header { background: #1f2937; color: #fff; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; }
+  .chat-header button { background: rgba(255,255,255,.15); border: none; color: #fff; width: 24px; height: 24px; border-radius: 6px; cursor: pointer; }
+  .chat-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: #f9fafb; }
+  .msg { display: flex; }
+  .msg.user { justify-content: flex-end; }
+  .bubble { max-width: 80%; padding: 8px 11px; border-radius: 10px; font-size: 13px; line-height: 1.4; }
+  .msg.assistant .bubble { background: #e5e7eb; color: #1f2937; }
+  .msg.user .bubble { background: #3B82F6; color: #fff; }
+  .options { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 10px; background: #f9fafb; }
+  .options button { background: #8B5CF6; color: #fff; border: none; border-radius: 14px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+  .options button:hover { background: #7C3AED; }
+  .chat-input { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #e5e7eb; }
+  .chat-input input { flex: 1; border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 9px; font-size: 13px; outline: none; }
+  .chat-input button { background: #3B82F6; color: #fff; border: none; border-radius: 6px; width: 34px; cursor: pointer; }
+
+  /* Escucha (Ctrl+Shift+P) */
+  .listen { position: absolute; top: 0; left: 50%; transform: translateX(-50%); background: #fff; border-radius: 12px;
+    padding: 10px 16px; font-size: 13px; color: #1f2937; box-shadow: 0 6px 18px rgba(0,0,0,.25); display: none; z-index: 20; white-space: nowrap; }
+  .listen.open { display: block; }
+  .listen b { color: #3B82F6; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="listen" id="listen">Escuchando… <b id="timer">5</b>s · ESC para cancelar</div>
+
+  <button class="cloud c1" data-id="chat">💬 Abrir chat</button>
+  <button class="cloud c2" data-id="cmd">⚡ Ver comandos</button>
+  <button class="cloud c3" data-id="config">⚙️ Configuración</button>
+  <button class="cloud c4" data-id="sleep">🌙 Dormir</button>
+
+  <div class="chat" id="chat">
+    <div class="chat-header"><b>Paula</b><button onclick="toggleChat()">✕</button></div>
+    <div class="chat-messages" id="messages">
+      <div class="msg assistant"><div class="bubble">Hola, soy Paula. ¿En qué te ayudo?</div></div>
+    </div>
+    <div class="options" id="options"></div>
+    <div class="chat-input">
+      <input id="input" placeholder="Escribe un mensaje..." onkeydown="if(event.key==='Enter')send()">
+      <button onclick="send()">➤</button>
+    </div>
+  </div>
+
+  <svg class="robot" id="robot" viewBox="0 0 120 100" onclick="toggleClouds()">
+    <rect x="22" y="6" width="76" height="10" rx="3" fill="#1f1f1f"/>
+    <rect x="14" y="14" width="92" height="74" rx="8" fill="#1f1f1f"/>
+    <rect x="8" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="104" y="34" width="8" height="18" rx="2" fill="#f5c518"/>
+    <rect x="18" y="20" width="84" height="62" rx="6" id="frame" fill="#4B5563"/>
+    <rect x="26" y="27" width="68" height="48" rx="4" fill="#111827"/>
+    <g class="eyes-group" id="eyes"></g>
+    <g id="mouth"></g>
+  </svg>
+</div>
+
+<script>
+  const STATES = {
+    sleeping:  { frame: '#4B5563' },
+    listening: { frame: '#2563EB' },
+    thinking:  { frame: '#EA580C' },
+    speaking:  { frame: '#059669' },
+    question:  { frame: '#7C3AED' },
+    angry:     { frame: '#B91C1C' }
+  };
+
+  const FACES = {
+    sleeping: {
+      eyes: `<path d="M38 52 Q46 58 54 52" stroke="#22d3ee" stroke-width="3" fill="none"/>
+             <path d="M66 52 Q74 58 82 52" stroke="#22d3ee" stroke-width="3" fill="none"/>`,
+      mouth: `<rect x="50" y="64" width="20" height="3" fill="#22d3ee"/>`
+    },
+    listening: {
+      eyes: `<rect class="blink" x="40" y="42" width="10" height="14" fill="#22d3ee"/>
+             <rect class="blink" x="70" y="42" width="10" height="14" fill="#22d3ee"/>`,
+      mouth: `<rect x="56" y="62" width="8" height="6" rx="2" fill="#22d3ee"/>`
+    },
+    thinking: {
+      eyes: `<rect class="blink" x="36" y="40" width="10" height="12" fill="#fb923c"/>
+             <rect class="blink" x="66" y="40" width="10" height="12" fill="#fb923c"/>`,
+      mouth: `<path d="M46 66 Q52 62 58 66 T70 66" stroke="#fb923c" stroke-width="3" fill="none"/>`
+    },
+    speaking: {
+      eyes: `<path d="M38 50 Q45 40 52 50" stroke="#34d399" stroke-width="3" fill="none"/>
+             <path d="M68 50 Q75 40 82 50" stroke="#34d399" stroke-width="3" fill="none"/>`,
+      mouth: `<path class="mouth-talk" d="M44 62 Q60 76 76 62 Z" fill="#34d399"/>`
+    },
+    question: {
+      // Una ceja levantada y ojos inquisitivos; boca pequeña de duda
+      eyes: `<rect class="blink" x="40" y="42" width="10" height="12" fill="#c4b5fd"/>
+             <rect class="blink" x="70" y="40" width="10" height="14" fill="#c4b5fd"/>
+             <path d="M68 36 L82 34" stroke="#c4b5fd" stroke-width="3"/>`,
+      mouth: `<ellipse cx="60" cy="66" rx="4" ry="3" fill="#c4b5fd"/>`
+    },
+    angry: {
+      eyes: `<path d="M34 40 L54 48" stroke="#ef4444" stroke-width="4"/>
+             <path d="M86 40 L66 48" stroke="#ef4444" stroke-width="4"/>
+             <rect x="40" y="48" width="10" height="8" fill="#ef4444"/>
+             <rect x="70" y="48" width="10" height="8" fill="#ef4444"/>`,
+      mouth: `<path d="M46 72 Q60 62 74 72" stroke="#ef4444" stroke-width="3" fill="none"/>`
+    }
+  };
+
+  const stage = document.getElementById('stage');
+  let hovered = null;
+  let timerId = null;
+  let resetId = null;
+
+  function setState(s) {
+    document.getElementById('eyes').innerHTML = FACES[s].eyes;
+    document.getElementById('mouth').innerHTML = FACES[s].mouth;
+    document.getElementById('frame').setAttribute('fill', STATES[s].frame);
+  }
+
+  // Estado temporal: vuelve a dormida después de un momento
+  function flash(s, ms) {
+    clearTimeout(resetId);
+    setState(s);
+    if (s === 'angry') {
+      const r = document.getElementById('robot');
+      r.classList.remove('shake'); void r.offsetWidth; r.classList.add('shake');
+    }
+    resetId = setTimeout(() => setState('sleeping'), ms);
+  }
+
+  function drawTrails() {
+    stage.querySelectorAll('.trail').forEach(t => t.remove());
+    const sr = stage.getBoundingClientRect();
+    const rr = document.getElementById('robot').getBoundingClientRect();
+    const cx = rr.left + rr.width / 2 - sr.left;
+    const cy = rr.top + rr.height / 2 - sr.top;
+    stage.querySelectorAll('.cloud').forEach(c => {
+      const b = c.getBoundingClientRect();
+      const x0 = b.left + b.width / 2 - sr.left;
+      const y0 = b.top + b.height / 2 - sr.top;
+      const dx = cx - x0, dy = cy - y0;
+      const len = Math.hypot(dx, dy);
+      const ux = dx / len, uy = dy / len;
+      const startX = x0 + ux * (b.width / 2 + 6);
+      const startY = y0 + uy * (b.height / 2 + 6);
+      const endX = cx - ux * 70, endY = cy - uy * 60;
+      [[0.35, 10], [0.7, 6]].forEach(([t, size]) => {
+        const d = document.createElement('div');
+        d.className = 'trail';
+        d.style.width = d.style.height = size + 'px';
+        d.style.left = (startX + (endX - startX) * t - size / 2) + 'px';
+        d.style.top = (startY + (endY - startY) * t - size / 2) + 'px';
+        stage.appendChild(d);
+      });
+    });
+  }
+
+  document.addEventListener('mousemove', e => {
+    const r = document.getElementById('robot').getBoundingClientRect();
+    let tx = e.clientX, ty = e.clientY;
+    if (hovered) {
+      const o = hovered.getBoundingClientRect();
+      tx = o.left + o.width / 2; ty = o.top + o.height / 2;
+    }
+    const dx = Math.max(-5, Math.min(5, (tx - (r.left + r.width / 2)) / 25));
+    const dy = Math.max(-3, Math.min(3, (ty - (r.top + r.height / 2)) / 25));
+    document.getElementById('eyes').style.transform = `translate(${dx}px, ${dy}px)`;
+  });
+
+  document.querySelectorAll('.cloud').forEach(btn => {
+    btn.addEventListener('mouseenter', () => { hovered = btn; btn.classList.add('hovered'); });
+    btn.addEventListener('mouseleave', () => { hovered = null; btn.classList.remove('hovered'); });
+    btn.addEventListener('click', e => { e.stopPropagation(); pick(btn.dataset.id); });
+  });
+
+  function toggleClouds() {
+    stage.classList.toggle('show');
+    if (stage.classList.contains('show')) drawTrails();
+  }
+  function toggleChat() { document.getElementById('chat').classList.toggle('open'); }
+  function hideClouds() { stage.classList.remove('show'); }
+
+  function pick(action) {
+    hideClouds();
+    if (action === 'chat') {
+      document.getElementById('chat').classList.add('open');
+      setState('listening');
+    } else if (action === 'sleep') {
+      setState('sleeping');
+    } else {
+      addMessage('assistant', action === 'cmd' ? 'Comandos disponibles: abrir apps y estado del sistema.' : 'Abriendo configuración...');
+      document.getElementById('chat').classList.add('open');
+    }
+  }
+
+  function addMessage(role, text) {
+    const box = document.getElementById('messages');
+    const d = document.createElement('div');
+    d.className = 'msg ' + role;
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = text;
+    d.appendChild(b);
+    box.appendChild(d);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // Muestra opciones como botones (pregunta de selección múltiple o confirmación)
+  function askOptions(question, options) {
+    addMessage('assistant', question);
+    const box = document.getElementById('options');
+    box.innerHTML = '';
+    options.forEach(opt => {
+      const b = document.createElement('button');
+      b.textContent = opt;
+      b.onclick = () => {
+        box.innerHTML = '';
+        addMessage('user', opt);
+        flash('speaking', 1500);
+        setTimeout(() => addMessage('assistant', 'Listo, elegiste: ' + opt + '.'), 600);
+      };
+      box.appendChild(b);
+    });
+    document.getElementById('chat').classList.add('open');
+    setState('question');
+  }
+
+  function send() {
+    const input = document.getElementById('input');
+    const text = input.value.trim();
+    if (!text) return;
+    addMessage('user', text);
+    input.value = '';
+    document.getElementById('options').innerHTML = '';
+    setState('thinking');
+    setTimeout(() => {
+      const t = text.toLowerCase();
+      if (t.includes('error')) {
+        addMessage('assistant', 'No pude completar esa acción.');
+        flash('angry', 2500);
+      } else if (t.includes('confirm') || t.includes('opcion') || t.includes('opción')) {
+        askOptions('¿Qué quieres que haga?', ['Abrir navegador', 'Estado del sistema', 'Cancelar']);
+      } else if (t.includes('borrar') || t.includes('apagar')) {
+        askOptions('Esta acción es destructiva. ¿Confirmas?', ['Sí, confirmo', 'No']);
+      } else {
+        addMessage('assistant', 'Entendido. Procesando tu solicitud...');
+        flash('speaking', 2000);
+      }
+    }, 1200);
+  }
+
+  // Ctrl+Shift+P muestra el indicador de escucha
+  function showListen() {
+    document.getElementById('listen').classList.add('open');
+    setState('listening');
+    let t = 5;
+    document.getElementById('timer').textContent = t;
+    clearInterval(timerId);
+    timerId = setInterval(() => {
+      t--;
+      document.getElementById('timer').textContent = t;
+      if (t <= 0) closeListen();
+    }, 1000);
+  }
+
+  function closeListen() {
+    clearInterval(timerId);
+    document.getElementById('listen').classList.remove('open');
+    setState('sleeping');
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeListen();
+    if (e.ctrlKey && e.shiftKey && (e.key === 'P' || e.key === 'p')) { e.preventDefault(); showListen(); }
+  });
+
+  setState('sleeping');
+</script>
+</body>
+</html>
