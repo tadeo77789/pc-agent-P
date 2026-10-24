@@ -106,9 +106,9 @@ class CloudMenu(QWidget):
         self.close_menu() if self.is_open else self.open_menu()
 
     def open_menu(self) -> None:
+        # Not raised above the robot: a second click on Paula has to reach her to close it.
         self._open = True
         self.show()
-        self.raise_()
         for dot in self._dots:
             dot.show()
         for i, button in enumerate(self._buttons):
@@ -123,6 +123,10 @@ class CloudMenu(QWidget):
             widget.hide()
         self.hide()
         self.hovered.emit(None)
+
+    def mousePressEvent(self, event) -> None:
+        # A click on the empty space around Paula closes the clouds.
+        self.close_menu()
 
     def _pick(self, cloud_id: str) -> None:
         self.close_menu()

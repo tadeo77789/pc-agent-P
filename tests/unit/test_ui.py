@@ -1,5 +1,5 @@
 from PySide6.QtCore import QPoint, QSettings, Qt
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QPushButton
 
@@ -184,3 +184,64 @@ def test_clouds_hug_the_robot(qapp):
         gap_y = max(robot.top() - cloud.bottom(), cloud.top() - robot.bottom(), 0)
         assert gap_x == 0, button.cloud_id  # overlaps the robot's column
         assert gap_y <= 30, button.cloud_id
+
+
+def test_real_drag_never_clicks(qapp):
+    robot = RobotWidget()
+    events = []
+    robot.clicked.connect(lambda: events.append("click"))
+    robot.drag_finished.connect(lambda: events.append("dropped"))
+
+    QTest.mousePress(robot, Qt.MouseButton.LeftButton, pos=QPoint(50, 50))
+    QTest.mouseMove(robot, QPoint(80, 70))
+    QTest.mouseRelease(robot, Qt.MouseButton.LeftButton, pos=QPoint(80, 70))
+
+    assert events == ["dropped"]
+
+
+def test_drag_keeps_the_robot_on_screen(qapp, tmp_path):
+    stage = StageWindow(temp_settings(tmp_path))
+    area = QGuiApplication.primaryScreen().availableGeometry()
+    stage.move(area.topLeft())
+
+    stage.robot.drag_started.emit()
+    stage.robot.dragged.emit(QPoint(100_000, 100_000))
+
+    assert area.contains(stage.body_rect())
+
+
+def test_second_click_on_paula_closes_the_clouds(qapp):
+    stage = StageWindow()
+    stage.show()
+    stage.robot.clicked.emit()
+    assert stage.clouds.is_open
+
+    center = stage.robot.geometry().center()
+    assert stage.childAt(center) is stage.robot  # the clouds overlay is not on top
+    QTest.mouseClick(stage.robot, Qt.MouseButton.LeftButton)
+
+    assert not stage.clouds.is_open
+
+
+def test_click_beside_the_clouds_closes_them(qapp):
+    stage = StageWindow()
+    stage.show()
+    stage.clouds.open_menu()
+
+    QTest.mouseClick(stage.clouds, Qt.MouseButton.LeftButton, pos=QPoint(2, 2))
+
+    assert not stage.clouds.is_open
+
+
+def test_chat_stays_on_screen_when_paula_is_top_left(qapp, tmp_path):
+    stage = StageWindow(temp_settings(tmp_path))
+    area = QGuiApplication.primaryScreen().availableGeometry()
+    stage.move(area.topLeft())
+    stage.robot.drag_started.emit()
+    stage.robot.dragged.emit(QPoint(-1000, -1000))
+    assert stage.body_rect().topLeft() == area.topLeft()
+    chat = ChatWindow()
+
+    chat.open_next_to(stage)
+
+    assert area.contains(chat.geometry())

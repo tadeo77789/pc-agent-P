@@ -8,11 +8,12 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from paula_agent.ui import theme
 from paula_agent.ui.chat.panel import ChatPanel
-from paula_agent.ui.clouds.menu import CloudMenu
+from paula_agent.ui.clouds.menu import BODY_MARGIN, CloudMenu
 from paula_agent.ui.robot.states import RobotState
 from paula_agent.ui.robot.widget import RobotWidget
 
 SCREEN_MARGIN = 16
+CHAT_GAP = 12
 POSITION_KEY = "stage/position"
 FLOATING = (
     Qt.WindowType.FramelessWindowHint
@@ -56,8 +57,8 @@ class StageWindow(QWidget):
     def place_in_corner(self) -> None:
         """Where the user last left Paula, or the bottom-right corner."""
         saved = self._settings.value(POSITION_KEY)
-        if isinstance(saved, QPoint) and self._robot_visible_at(saved):
-            self.move(saved)
+        if isinstance(saved, QPoint) and self._screen_for(saved) is not None:
+            self.move(self._clamped(saved))
             return
         screen = QGuiApplication.primaryScreen().availableGeometry()
         self.move(
@@ -65,19 +66,43 @@ class StageWindow(QWidget):
             screen.bottom() - self.height() - SCREEN_MARGIN,
         )
 
-    def _robot_visible_at(self, pos: QPoint) -> bool:
-        # A monitor may have been unplugged since the position was saved.
+    def body_rect(self, pos: QPoint | None = None) -> QRect:
+        """The painted robot in global coordinates if the stage were at `pos`."""
+        pos = self.pos() if pos is None else pos
+        left, top, right, bottom = BODY_MARGIN
         robot = QRect(pos + self.robot.pos(), self.robot.size())
-        return any(s.availableGeometry().intersects(robot) for s in QGuiApplication.screens())
+        return robot.adjusted(left, top, -right, -bottom)
+
+    def _screen_for(self, pos: QPoint) -> QRect | None:
+        # A monitor may have been unplugged since the position was saved.
+        body = self.body_rect(pos)
+        areas = [s.availableGeometry() for s in QGuiApplication.screens()]
+        touching = [a for a in areas if a.intersects(body)]
+        if not touching:
+            return None
+        return max(
+            touching, key=lambda a: a.intersected(body).width() * a.intersected(body).height()
+        )
+
+    def _clamped(self, pos: QPoint) -> QPoint:
+        """Keep the whole painted robot on one screen, so she can always be grabbed."""
+        # A fast drag can jump past the edge: then stick to the screen she is on.
+        area = (
+            self._screen_for(pos)
+            or self._screen_for(self.pos())
+            or QGuiApplication.primaryScreen().availableGeometry()
+        )
+        body = self.body_rect(pos)
+        dx = max(area.left() - body.left(), 0) + min(area.right() - body.right(), 0)
+        dy = max(area.top() - body.top(), 0) + min(area.bottom() - body.bottom(), 0)
+        return pos + QPoint(dx, dy)
 
     def _start_drag(self) -> None:
         self.clouds.close_menu()
         self._drag_origin = self.pos()
 
     def _drag(self, offset: QPoint) -> None:
-        target = self._drag_origin + offset
-        if self._robot_visible_at(target):
-            self.move(target)
+        self.move(self._clamped(self._drag_origin + offset))
 
     def _save_position(self) -> None:
         self._settings.setValue(POSITION_KEY, self.pos())
@@ -113,10 +138,19 @@ class ChatWindow(QWidget):
         layout.addWidget(self.panel)
         self.panel.closed.connect(self.hide)
 
-    def open_next_to(self, stage: QWidget) -> None:
-        """Open to the left of the stage, bottom-aligned with the robot."""
-        anchor = stage.mapToGlobal(QPoint(0, stage.height() // 2 + theme.ROBOT_SIZE[1] // 2))
-        self.move(anchor.x() - self.width() + 60, anchor.y() - self.height())
+    def open_next_to(self, stage: StageWindow) -> None:
+        """Open to the left of the robot, bottom-aligned with it; to the right if there is
+        no room, and always inside the robot's screen."""
+        body = stage.body_rect()
+        screen = QGuiApplication.screenAt(body.center()) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
+        x = body.left() - CHAT_GAP - self.width()
+        if x < area.left():
+            x = body.right() + CHAT_GAP
+        y = body.bottom() - self.height()
+        x = min(max(x, area.left()), area.right() - self.width())
+        y = min(max(y, area.top()), area.bottom() - self.height())
+        self.move(x, y)
         self.show()
         self.raise_()
         self.activateWindow()
