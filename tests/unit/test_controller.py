@@ -107,7 +107,7 @@ def make(parts):
         wake_detector=parts["wake_detector"],
         exclusion=ExclusionPolicy(),
         foreground=lambda: parts["window"],
-        open_settings=lambda: parts["opened"].append(True),
+        quit_app=lambda: parts["opened"].append(True),
         spawn=lambda work: work(),
         threaded_speech=False,
     )
@@ -260,12 +260,14 @@ def test_commands_cloud_lists_apps(parts):
     assert "navegador, spotify" in parts["chat"].panel.bubbles()[-1].text()
 
 
-def test_settings_cloud_opens_settings(parts):
+def test_quit_cloud_closes_paula(parts):
     controller = make(parts)  # noqa: F841 (keep it alive: Qt drops its connections)
+    parts["chat"].show()
 
-    parts["stage"].cloud_picked.emit("settings")
+    parts["stage"].cloud_picked.emit("quit")
 
     assert parts["opened"] == [True]
+    assert not parts["chat"].isVisible()
 
 
 def test_no_reply_turns_angry(parts):

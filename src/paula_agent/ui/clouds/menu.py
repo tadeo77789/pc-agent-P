@@ -20,7 +20,7 @@ from paula_agent.ui import theme
 CLOUDS = (
     ("chat", "💬 Abrir chat", "top-left"),
     ("commands", "⚡ Ver comandos", "top-right"),
-    ("settings", "⚙️ Configuración", "bottom-left"),
+    ("quit", "🔌 Apagar Paula", "bottom-left"),
     ("sleep", "🌙 Dormir", "bottom-right"),
 )
 STAGGER_MS = 80

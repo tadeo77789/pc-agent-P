@@ -16,7 +16,7 @@ from paula_agent.audio.stt import Transcriber
 from paula_agent.audio.tts import Speaker
 from paula_agent.commands.runner import CommandRunner, load_apps
 from paula_agent.config.settings import Settings, SettingsError, log_dir, setup_logging
-from paula_agent.controller import AgentController, settings_opener
+from paula_agent.controller import AgentController
 from paula_agent.messaging.bus import AgentBus
 from paula_agent.ui.window import ChatWindow, StageWindow
 
@@ -99,7 +99,7 @@ def main() -> int:
         wake_detector=wake,
         exclusion=ExclusionPolicy.from_names(settings.excluded_apps),
         foreground=foreground_window,
-        open_settings=settings_opener(settings.env_file),
+        quit_app=app.quit,
         listen_seconds=settings.hotkey_listen_seconds,
     )
     hotkey = HotkeyListener(controller.hotkey_pressed, controller.escape_pressed, settings.hotkey)

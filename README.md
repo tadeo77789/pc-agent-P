@@ -57,7 +57,7 @@ Start at logon: `powershell -ExecutionPolicy Bypass -File scripts\install-startu
 - **Listening.** Only after activation, the mic records one utterance (until about 1 s of silence) and Faster-Whisper transcribes it locally. Nothing is stored.
 - **Hub.** The text goes to the hub as a signed `Order`. Replies (`Result`) set the robot state, add a chat bubble and are spoken with ElevenLabs when `speak` is true.
 - **Commands.** The hub sends `Action`s; only `open_app` (apps from `config/default_apps.json` or `APPS_FILE`), `system_status` and `shutdown_pc` (needs `confirmed`, 60 s grace, `shutdown /a` cancels) run. Each one reports an `Event`.
-- **Clouds.** Abrir chat, Ver comandos (lists the apps), Configuración (opens `.env` in Notepad), Dormir (ignores the wake word until you click Paula; the hotkey still works).
+- **Clouds.** Abrir chat, Ver comandos (lists the apps), Apagar Paula (closes the assistant; it starts again with the PC), Dormir (ignores the wake word until you click Paula; the hotkey still works).
 
 ## Contributing
 

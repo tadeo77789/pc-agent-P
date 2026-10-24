@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
@@ -62,7 +61,7 @@ class AgentController(QObject):
         wake_detector,
         exclusion: ExclusionPolicy,
         foreground: Callable[[], WindowInfo | None],
-        open_settings: Callable[[], None],
+        quit_app: Callable[[], None],
         listen_seconds: int = 5,
         spawn: Callable[[Callable[[], None]], None] = spawn_thread,
         threaded_speech: bool = True,
@@ -78,7 +77,7 @@ class AgentController(QObject):
         self._wake_detector = wake_detector
         self._exclusion = exclusion
         self._foreground = foreground
-        self._open_settings = open_settings
+        self._quit_app = quit_app
         self._listen_seconds = listen_seconds
         self._spawn = spawn
 
@@ -341,8 +340,10 @@ class AgentController(QObject):
             apps = ", ".join(self._runner.app_names)
             self._chat.panel.add_message("assistant", COMMANDS_TEXT.format(apps=apps))
             self._chat.open_next_to(self._stage)
-        elif cloud_id == "settings":
-            self._open_settings()
+        elif cloud_id == "quit":
+            self._speech.stop()
+            self._chat.hide()
+            self._quit_app()
         elif cloud_id == "sleep":
             self._asleep = True
             self._wake_detector.pause()
@@ -372,12 +373,3 @@ class AgentController(QObject):
     @property
     def asleep(self) -> bool:
         return self._asleep
-
-
-def settings_opener(path: Path) -> Callable[[], None]:
-    def open_settings() -> None:
-        import subprocess
-
-        subprocess.Popen(["notepad.exe", str(path)])
-
-    return open_settings
