@@ -50,6 +50,7 @@ class Settings:
     elevenlabs_model: str
     whisper_model: str
     whisper_language: str
+    whisper_device: str
     wake_words: list[str]
     wake_word_min_confidence: float
     hotkey: str
@@ -73,6 +74,9 @@ class Settings:
             listen_seconds = int(os.environ.get("HOTKEY_LISTEN_SECONDS") or 5)
         except ValueError as exc:
             raise SettingsError(f"Invalid number in .env: {exc}") from exc
+        whisper_device = (os.environ.get("WHISPER_DEVICE") or "auto").lower()
+        if whisper_device not in ("auto", "cuda", "cpu"):
+            raise SettingsError("WHISPER_DEVICE must be auto, cuda or cpu")
         return cls(
             rabbitmq_url=os.environ.get("RABBITMQ_URL", "amqp://paula:paula@localhost:5672/"),
             agent_shared_secret=secret,
@@ -81,6 +85,7 @@ class Settings:
             elevenlabs_model=os.environ.get("ELEVENLABS_MODEL", "eleven_flash_v2_5"),
             whisper_model=os.environ.get("WHISPER_MODEL", "small"),
             whisper_language=os.environ.get("WHISPER_LANGUAGE", "es"),
+            whisper_device=whisper_device,
             wake_words=[
                 w.strip() for w in os.environ.get("WAKE_WORDS", "paula,paula port").split(",")
             ],
