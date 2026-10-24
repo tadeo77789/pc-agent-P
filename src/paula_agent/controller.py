@@ -25,7 +25,9 @@ THINKING_TIMEOUT_MS = 60_000
 FLASH_MS = {RobotState.SPEAKING: 2000, RobotState.ANGRY: 2500}
 # Pause between the end of Paula's voice and listening again, so the tail of her own
 # audio (Bluetooth adds latency) is not recorded as the user's answer.
-FOLLOW_UP_DELAY_MS = 400
+FOLLOW_UP_DELAY_MS = 700
+# Follow-ups per activation: background talk (a TV) must not keep the mic open forever.
+MAX_FOLLOW_UPS = 5
 
 # User-facing text, Spanish
 NO_REPLY_TEXT = "No obtuve respuesta. ¿Está corriendo el hub?"
@@ -96,6 +98,7 @@ class AgentController(QObject):
         # Source of the voice conversation in progress (follow-ups need no wake word).
         self._conversation: Source | None = None
         self._following = False
+        self._follow_ups = 0
         # Result ids that answer the order in flight; anything else is a late reply.
         self._expected: set[str] = set()
         # Sentences of the reply in flight that already arrived as partial results.
@@ -153,12 +156,14 @@ class AgentController(QObject):
         if self._exclusion.is_excluded(self._foreground()):
             log.info("Wake word ignored in excluded app")
             return
+        self._follow_ups = 0
         self._listen(Source.VOICE)
 
     def _on_hotkey(self) -> None:
         if self._busy:
             return
         self._asleep = False
+        self._follow_ups = 0
         self._listen(Source.HOTKEY)
         self._countdown = self._listen_seconds
         self._stage.show_listen(self._countdown)
@@ -237,14 +242,22 @@ class AgentController(QObject):
 
     def _follow_up(self) -> None:
         """Listen for the next thing the user says, without the wake word."""
-        if self._conversation is None or self._asleep or self._expected or self._listening:
+        if self._expected or self._listening:
+            return  # a new order or recording took over
+        if self._conversation is None or self._asleep or self._follow_ups >= MAX_FOLLOW_UPS:
+            self._idle()
             return
         if self._exclusion.is_excluded(self._foreground()):
             # In Discord or a game the mic would pick up the user talking to others.
             log.info("Conversation ended: excluded app in front")
             self._idle()
             return
+        self._follow_ups += 1
         self._following = True
+        # Same banner as the hotkey: the mic is open again and Esc ends it.
+        self._countdown = int(self._conversation_seconds)
+        self._stage.show_listen(self._countdown)
+        self._countdown_timer.start()
         self._listen(self._conversation, timeout_seconds=self._conversation_seconds)
 
     def _end_conversation(self) -> None:
@@ -409,6 +422,8 @@ class AgentController(QObject):
             self._end_conversation()
             if self._listening:
                 self._cancel.set()  # stop a follow-up recording too
+            elif not self._expected:
+                self._busy = False  # picked between a reply and its follow-up
             self._asleep = True
             self._wake_detector.pause()
             self._chat.hide()

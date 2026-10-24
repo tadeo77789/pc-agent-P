@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from paula_agent.activation.foreground import ExclusionPolicy, WindowInfo
-from paula_agent.controller import NO_REPLY_TEXT, AgentController
+from paula_agent.controller import MAX_FOLLOW_UPS, NO_REPLY_TEXT, AgentController
 from paula_agent.messaging.messages import (
     Action,
     Channel,
@@ -595,3 +595,45 @@ def test_sleep_cloud_ends_the_conversation(parts):
     controller._follow_up()
 
     assert parts["recorder"].timeouts == [5]
+
+
+def test_hotkey_works_after_sleeping_between_reply_and_follow_up(parts):
+    controller = talk(parts, "hola paula", "otra cosa")
+    controller.wake_word_heard()
+    answer(controller, parts)
+
+    parts["stage"].cloud_picked.emit("sleep")  # in the gap before the follow-up
+    parts["stage"].robot.clicked.emit()
+    controller.hotkey_pressed()
+
+    assert parts["bus"].orders[-1].text == "otra cosa"
+
+
+def test_follow_ups_stop_at_the_cap(parts):
+    texts = [f"frase {i}" for i in range(MAX_FOLLOW_UPS + 3)]
+    controller = talk(parts, *texts)
+    controller.wake_word_heard()
+    for _ in range(MAX_FOLLOW_UPS + 2):
+        answer(controller, parts)
+        controller._follow_up()
+
+    assert len(parts["bus"].orders) == 1 + MAX_FOLLOW_UPS
+    assert state(parts) is RobotState.SLEEPING
+
+
+def test_follow_up_shows_the_listen_banner(parts):
+    controller = talk(parts, "hola paula")
+    controller.wake_word_heard()
+    answer(controller, parts)
+    seen = []
+    record = parts["recorder"].record
+
+    def spy(start_timeout_seconds, cancel):
+        seen.append(parts["stage"].listen_visible)
+        return record(start_timeout_seconds, cancel)
+
+    parts["recorder"].record = spy
+    controller._follow_up()
+
+    assert seen == [True]
+    assert not parts["stage"].listen_visible

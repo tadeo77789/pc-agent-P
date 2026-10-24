@@ -9,7 +9,21 @@ def test_normalize_drops_accents_and_punctuation():
 
 @pytest.mark.parametrize(
     "text",
-    ["Gracias, Paula.", "adiós", "Eso es todo", "nada más, gracias", "Listo.", "hasta luego"],
+    [
+        "Gracias, Paula.",
+        "adiós",
+        "Eso es todo",
+        "nada más, gracias",
+        "Listo.",
+        "hasta luego",
+        "No, nada más",
+        "No, gracias",
+        "Sí, gracias",
+        "Gracias por la ayuda",
+        "Muchas gracias por todo",
+        "Hasta mañana",
+        "Buenas noches",
+    ],
 )
 def test_farewells(text):
     assert is_farewell(text)

@@ -12,23 +12,23 @@ FAREWELL_PHRASES = (
     "adios",
     "hasta luego",
     "hasta pronto",
+    "hasta manana",
+    "buenas noches",
     "chao",
     "chau",
-    "gracias paula",
-    "muchas gracias",
+    "gracias",
+    "gracias por todo",
+    "gracias por la ayuda",
+    "gracias por tu ayuda",
     "eso es todo",
     "eso seria todo",
     "nada mas",
     "ya esta",
-    "listo gracias",
-    "ok gracias",
-    "vale gracias",
 )
 # Said on its own, these also end the conversation.
-FAREWELL_WORDS = ("gracias", "listo", "nada")
+FAREWELL_WORDS = ("listo", "nada")
 FILLER_WORDS = frozenset(
     [
-        "gracias",
         "muchas",
         "paula",
         "port",
@@ -36,11 +36,11 @@ FILLER_WORDS = frozenset(
         "vale",
         "bueno",
         "si",
+        "no",
         "listo",
         "pues",
         "entonces",
         "ya",
-        "por",
         "ahora",
     ]
 )
