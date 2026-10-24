@@ -40,3 +40,13 @@ def test_env_file_is_read(monkeypatch, tmp_path):
 
     assert settings.wake_words == ["paula"]
     assert settings.apps_file == Path("apps.json")
+
+
+def test_empty_optional_paths_use_defaults(monkeypatch, tmp_path):
+    env = tmp_path / ".env"
+    env.write_text(f"AGENT_SHARED_SECRET={'y' * 40}\nAPPS_FILE=\nMODELS_DIR=\n")
+
+    settings = Settings.from_env(env)
+
+    assert settings.apps_file is None
+    assert settings.models_dir.name == "models"

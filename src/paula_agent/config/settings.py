@@ -60,7 +60,7 @@ class Settings:
             hotkey_listen_seconds=int(os.environ.get("HOTKEY_LISTEN_SECONDS", "5")),
             excluded_apps=os.environ.get("EXCLUDED_APPS", ""),
             apps_file=Path(apps_file) if apps_file else None,
-            models_dir=Path(os.environ.get("MODELS_DIR", _local_data() / "models")),
+            models_dir=Path(os.environ.get("MODELS_DIR") or _local_data() / "models"),
             env_file=env_file,
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
         )
