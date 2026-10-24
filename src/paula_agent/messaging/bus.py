@@ -79,10 +79,18 @@ class AgentBus:
                 self._buffer.append((key, body))
                 return
         try:
-            connection.add_callback_threadsafe(lambda: self._send(key, body))
+            connection.add_callback_threadsafe(lambda: self._send_or_buffer(key, body))
         except AMQPError:
             with self._lock:
                 self._buffer.append((key, body))
+
+    def _send_or_buffer(self, key: str, body: bytes) -> None:
+        try:
+            self._send(key, body)
+        except AMQPError:
+            with self._lock:
+                self._buffer.append((key, body))
+            raise
 
     def _send(self, key: str, body: bytes) -> None:
         assert self._channel is not None
@@ -105,6 +113,9 @@ class AgentBus:
                 log.warning(
                     "RabbitMQ unavailable (%s); retrying in %ss", exc, self._reconnect_delay
                 )
+            except Exception:
+                # Never let the bus thread die: later orders would be lost silently.
+                log.exception("Bus error; reconnecting in %ss", self._reconnect_delay)
             finally:
                 with self._lock:
                     self._connection = self._channel = None
@@ -121,8 +132,13 @@ class AgentBus:
             self._connection, self._channel = connection, channel
             pending = list(self._buffer)
             self._buffer.clear()
-        for key, body in pending:
-            self._send(key, body)
+        for i, (key, body) in enumerate(pending):
+            try:
+                self._send(key, body)
+            except AMQPError:
+                with self._lock:
+                    self._buffer.extendleft(reversed(pending[i:]))
+                raise
         log.info("Connected to RabbitMQ")
         try:
             channel.start_consuming()
@@ -137,7 +153,7 @@ class AgentBus:
             try:
                 verify(self._secret, body, properties.headers)
                 message = parse(json.loads(body))
-            except (InvalidSignature, ValueError, KeyError) as exc:
+            except (InvalidSignature, ValueError, KeyError, TypeError, AttributeError) as exc:
                 log.warning("Dropping invalid message on %s: %s", method.routing_key, exc)
                 return
             try:
