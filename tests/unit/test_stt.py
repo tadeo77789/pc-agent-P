@@ -63,3 +63,26 @@ def test_register_cuda_dlls_without_wheels(monkeypatch):
     monkeypatch.setattr(stt.importlib, "import_module", missing)
 
     assert stt.register_cuda_dlls() == []
+
+
+def test_gpu_failure_at_transcription_switches_to_cpu(monkeypatch):
+    class OutOfMemoryModel:
+        def transcribe(self, audio, **kwargs):
+            raise RuntimeError("CUDA failed with error out of memory")
+
+    class Segment:
+        text = " hola "
+
+    class CpuModel:
+        def transcribe(self, audio, **kwargs):
+            return iter([Segment()]), None
+
+    monkeypatch.setattr(
+        Transcriber,
+        "_create",
+        lambda self, device, ct: OutOfMemoryModel() if device == "cuda" else CpuModel(),
+    )
+    transcriber = Transcriber(device="auto")
+
+    assert transcriber.transcribe(None) == "hola"
+    assert transcriber.device_used == "cpu"

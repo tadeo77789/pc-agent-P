@@ -73,6 +73,19 @@ class Transcriber:
 
     def transcribe(self, audio: np.ndarray) -> str:
         self.load()
+        try:
+            return self._run(audio)
+        except Exception:
+            if self.device_used != "cuda" or self._device == "cuda":
+                raise
+            # GPU out of memory (a game, Qwen) or a driver reset: carry on with the CPU.
+            log.exception("Whisper failed on the GPU; switching to CPU")
+            with self._lock:
+                self._model = self._create("cpu", "int8")
+                self.device_used = "cpu"
+            return self._run(audio)
+
+    def _run(self, audio: np.ndarray) -> str:
         segments, _ = self._model.transcribe(
             audio, language=self._language, beam_size=1, vad_filter=True
         )
