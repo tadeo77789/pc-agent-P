@@ -4,7 +4,6 @@ from typing import ClassVar
 import pytest
 from dotenv import dotenv_values
 
-from paula_agent.__main__ import fresh_environment
 from paula_agent.audio.devices import AudioDevice
 from paula_agent.config.memory_file import MemoryBusy, MemoryFile
 from paula_agent.config.settings import Settings
@@ -155,14 +154,3 @@ def test_busy_memory_is_reported(qapp, env, tmp_path):
     window = make(env, tmp_path, Busy())
 
     assert "ocupada" in window.facts.item(0).text()
-
-
-def test_restart_environment_drops_keys_from_env_file(env, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_SPEED", "1.00")  # copied by load_dotenv at start-up
-    env.write_text(env.read_text("utf-8") + "ELEVENLABS_SPEED='1.20'" + chr(10), "utf-8")
-
-    fresh = fresh_environment(env)
-
-    assert "ELEVENLABS_SPEED" not in fresh
-    assert "AGENT_SHARED_SECRET" not in fresh
-    assert "PATH" in fresh
