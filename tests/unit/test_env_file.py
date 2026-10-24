@@ -38,8 +38,11 @@ def test_values_read_back_exactly(tmp_path, value):
     assert dotenv_values(env)["MIC_DEVICE"] == value
 
 
-@pytest.mark.parametrize("value", ["x\nAGENT_SHARED_SECRET=hack", "x\rY=1", "x\u2028Y=1", "x\x1cY"])
-def test_rejects_line_breaks(tmp_path, value):
+@pytest.mark.parametrize(
+    "value",
+    ["x\nAGENT_SHARED_SECRET=hack", "x\rY=1", "x\u2028Y=1", "x\x1cY", "${AGENT_SHARED_SECRET}"],
+)
+def test_rejects_unsafe_values(tmp_path, value):
     env = tmp_path / ".env"
     env.write_text("A=1\n", encoding="utf-8")
 
