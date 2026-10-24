@@ -15,12 +15,14 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QSpinBox,
@@ -31,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from paula_agent.audio.devices import AudioDevice
 from paula_agent.config.env_file import update_env
+from paula_agent.config.knowledge_folder import SUFFIXES, KnowledgeFolder
 from paula_agent.config.memory_file import MemoryBusy, MemoryFile
 from paula_agent.config.settings import Settings
 from paula_agent.ui import theme
@@ -80,6 +83,9 @@ class SettingsWindow(QWidget):
         *,
         list_devices: Callable[[str], list[AudioDevice]],
         memory: MemoryFile,
+        knowledge: KnowledgeFolder | None = None,
+        pick_files: Callable[[], list[Path]] | None = None,
+        confirm: Callable[[str], bool] | None = None,
         open_meter: Callable[[int | None], LevelMeter] = LevelMeter,
         play_tone: Callable[[int | None], None] = play_test_tone,
     ) -> None:
@@ -90,6 +96,9 @@ class SettingsWindow(QWidget):
         self._settings = settings
         self._env_file: Path = settings.env_file
         self._memory = memory
+        self._knowledge = knowledge or KnowledgeFolder(settings.knowledge_dir)
+        self._pick_files = pick_files or self._ask_for_files
+        self._confirm = confirm or self._ask_to_confirm
         self._open_meter = open_meter
         self._play_tone = play_tone
         self._meter: LevelMeter | None = None
@@ -99,6 +108,7 @@ class SettingsWindow(QWidget):
         tabs.addTab(self._voice_tab(), "Voz y conversación")
         tabs.addTab(self._activation_tab(), "Activación")
         tabs.addTab(self._memory_tab(), "Memoria")
+        tabs.addTab(self._knowledge_tab(), "Conocimiento")
 
         self.error = QLabel("")
         self.error.setStyleSheet("color: #B91C1C;")
@@ -185,6 +195,34 @@ class SettingsWindow(QWidget):
         layout.addWidget(delete, alignment=Qt.AlignmentFlag.AlignRight)
         return page
 
+    def _knowledge_tab(self) -> QWidget:
+        self.documents = QListWidget()
+        self.documents.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        add = QPushButton("Agregar archivos…")
+        add.clicked.connect(self._add_documents)
+        remove = QPushButton("Quitar seleccionados")
+        remove.clicked.connect(self._remove_documents)
+        folder = QPushButton("Abrir carpeta")
+        folder.clicked.connect(self._open_folder)
+        self._reload_documents()
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(add)
+        buttons.addWidget(folder)
+        buttons.addStretch()
+        buttons.addWidget(remove)
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        hint = QLabel(
+            "Documentos de los que Paula aprende (.md, .txt, .pdf). Los nuevos los "
+            "aprende en menos de un minuto. También puedes decirle «apréndete esto: …»."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        layout.addWidget(self.documents)
+        layout.addLayout(buttons)
+        return page
+
     # Behaviour
 
     def _device_combo(self, devices: list[AudioDevice], current: str) -> QComboBox:
@@ -241,6 +279,69 @@ class SettingsWindow(QWidget):
         except MemoryBusy:
             self.error.setText("La memoria está ocupada. Inténtalo de nuevo en un momento.")
         self._reload_facts()
+
+    def _reload_documents(self) -> None:
+        self.documents.clear()
+        names = self._knowledge.files()
+        self.documents.addItems(names)
+        if not names:
+            item = QListWidgetItem("Todavía no hay documentos.")
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.documents.addItem(item)
+
+    def _add_documents(self) -> None:
+        sources = self._pick_files()
+        if not sources:
+            return
+        try:
+            _, skipped = self._knowledge.add(sources)
+        except OSError:
+            log.exception("Could not copy documents")
+            self.error.setText("No pude copiar los archivos a la carpeta de conocimiento.")
+            return
+        self.error.setText(
+            "No se agregaron (formato no soportado): " + ", ".join(skipped) if skipped else ""
+        )
+        self._reload_documents()
+
+    def _remove_documents(self) -> None:
+        names = [
+            i.text()
+            for i in self.documents.selectedItems()
+            if i.flags() & Qt.ItemFlag.ItemIsEnabled
+        ]
+        if not names:
+            return
+        question = (
+            f"¿Quitar {len(names)} documento(s)? Paula dejará de usarlos y se borrarán "
+            "de la carpeta de conocimiento."
+        )
+        if not self._confirm(question):
+            return
+        try:
+            self._knowledge.remove(names)
+            self.error.clear()
+        except (OSError, ValueError):
+            log.exception("Could not remove documents")
+            self.error.setText("No pude quitar alguno de los documentos.")
+        self._reload_documents()
+
+    def _open_folder(self) -> None:
+        try:
+            self._knowledge.open_in_explorer()
+        except OSError:
+            self.error.setText("No pude abrir la carpeta de conocimiento.")
+
+    def _ask_for_files(self) -> list[Path]:
+        patterns = " ".join(f"*{s}" for s in SUFFIXES)
+        names, _ = QFileDialog.getOpenFileNames(
+            self, "Agregar documentos", str(Path.home()), f"Documentos ({patterns})"
+        )
+        return [Path(n) for n in names]
+
+    def _ask_to_confirm(self, question: str) -> bool:
+        answer = QMessageBox.question(self, "Paula", question)
+        return answer == QMessageBox.StandardButton.Yes
 
     def changes(self) -> dict[str, str]:
         return {

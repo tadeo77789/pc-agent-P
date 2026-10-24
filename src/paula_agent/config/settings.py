@@ -11,6 +11,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from paula_agent.config.knowledge_folder import default_knowledge_dir
+
 
 class SettingsError(Exception):
     pass
@@ -51,6 +53,7 @@ class Settings:
     elevenlabs_speed: float
     mic_device: str
     speaker_device: str
+    knowledge_dir: Path
     whisper_model: str
     whisper_language: str
     whisper_device: str
@@ -96,6 +99,7 @@ class Settings:
             elevenlabs_speed=speed,
             mic_device=os.environ.get("MIC_DEVICE", "").strip(),
             speaker_device=os.environ.get("SPEAKER_DEVICE", "").strip(),
+            knowledge_dir=Path(os.environ.get("KNOWLEDGE_DIR") or default_knowledge_dir()),
             whisper_model=os.environ.get("WHISPER_MODEL", "small"),
             whisper_language=os.environ.get("WHISPER_LANGUAGE", "es"),
             whisper_device=whisper_device,

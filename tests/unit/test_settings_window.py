@@ -5,6 +5,7 @@ import pytest
 from dotenv import dotenv_values
 
 from paula_agent.audio.devices import AudioDevice
+from paula_agent.config.knowledge_folder import KnowledgeFolder
 from paula_agent.config.memory_file import MemoryBusy, MemoryFile
 from paula_agent.config.settings import Settings
 from paula_agent.ui.settings.window import SettingsWindow
@@ -50,12 +51,14 @@ def memory_db(tmp_path, facts):
     return MemoryFile(path)
 
 
-def make(env, tmp_path, memory=None):
+def make(env, tmp_path, memory=None, **kwargs):
     FakeMeter.opened = []
     return SettingsWindow(
         Settings.from_env(env),
         list_devices=lambda kind: DEVICES[kind],
         memory=memory or MemoryFile(tmp_path / "none.sqlite3"),
+        knowledge=kwargs.pop("knowledge", KnowledgeFolder(tmp_path / "Conocimiento")),
+        **kwargs,
         open_meter=FakeMeter,
         play_tone=lambda device: None,
     )
@@ -154,3 +157,36 @@ def test_busy_memory_is_reported(qapp, env, tmp_path):
     window = make(env, tmp_path, Busy())
 
     assert "ocupada" in window.facts.item(0).text()
+
+
+def test_knowledge_tab_adds_and_removes_documents(qapp, env, tmp_path):
+    doc = tmp_path / "arquitectura.md"
+    doc.write_text("# Hexagonal", encoding="utf-8")
+    answers = []
+    window = make(
+        env,
+        tmp_path,
+        pick_files=lambda: [doc, tmp_path / "foto.png"],
+        confirm=lambda question: answers.append(question) or True,
+    )
+    assert window.documents.item(0).text() == "Todavía no hay documentos."
+
+    window._add_documents()
+
+    assert window.documents.item(0).text() == "arquitectura.md"
+    assert "foto.png" in window.error.text()
+    window.documents.item(0).setSelected(True)
+    window._remove_documents()
+    assert answers and not (tmp_path / "Conocimiento" / "arquitectura.md").exists()
+
+
+def test_cancelled_removal_keeps_the_document(qapp, env, tmp_path):
+    folder = KnowledgeFolder(tmp_path / "Conocimiento")
+    folder.path.mkdir()
+    (folder.path / "guia.md").write_text("x", encoding="utf-8")
+    window = make(env, tmp_path, knowledge=folder, confirm=lambda question: False)
+
+    window.documents.item(0).setSelected(True)
+    window._remove_documents()
+
+    assert folder.files() == ["guia.md"]
