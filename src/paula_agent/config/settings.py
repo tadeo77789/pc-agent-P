@@ -11,6 +11,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from paula_agent.config.knowledge_folder import default_knowledge_dir
+
 
 class SettingsError(Exception):
     pass
@@ -51,6 +53,7 @@ class Settings:
     elevenlabs_speed: float
     mic_device: str
     speaker_device: str
+    knowledge_dir: Path | None
     whisper_model: str
     whisper_language: str
     whisper_device: str
@@ -87,6 +90,13 @@ class Settings:
         whisper_device = (os.environ.get("WHISPER_DEVICE") or "auto").lower()
         if whisper_device not in ("auto", "cuda", "cpu"):
             raise SettingsError("WHISPER_DEVICE must be auto, cuda or cpu")
+        knowledge_value = os.environ.get("KNOWLEDGE_DIR", "").strip()
+        # "off" (as in the hub) means no knowledge base: the tab is hidden.
+        knowledge_dir = (
+            None
+            if knowledge_value.lower() == "off"
+            else Path(knowledge_value or default_knowledge_dir())
+        )
         return cls(
             rabbitmq_url=os.environ.get("RABBITMQ_URL", "amqp://paula:paula@localhost:5672/"),
             agent_shared_secret=secret,
@@ -96,6 +106,7 @@ class Settings:
             elevenlabs_speed=speed,
             mic_device=os.environ.get("MIC_DEVICE", "").strip(),
             speaker_device=os.environ.get("SPEAKER_DEVICE", "").strip(),
+            knowledge_dir=knowledge_dir,
             whisper_model=os.environ.get("WHISPER_MODEL", "small"),
             whisper_language=os.environ.get("WHISPER_LANGUAGE", "es"),
             whisper_device=whisper_device,

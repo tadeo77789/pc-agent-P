@@ -7,6 +7,7 @@ effect the same way. User-facing text is Spanish.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,12 +16,14 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QSpinBox,
@@ -31,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from paula_agent.audio.devices import AudioDevice
 from paula_agent.config.env_file import update_env
+from paula_agent.config.knowledge_folder import SUFFIXES, KnowledgeFolder
 from paula_agent.config.memory_file import MemoryBusy, MemoryFile
 from paula_agent.config.settings import Settings
 from paula_agent.ui import theme
@@ -40,6 +44,10 @@ log = logging.getLogger(__name__)
 DEFAULT_DEVICE = "Predeterminado de Windows"
 METER_RATE = 16000
 TEST_TONE_SECONDS = 0.6
+
+
+def spawn_thread(work: Callable[[], None]) -> None:
+    threading.Thread(target=work, daemon=True).start()
 
 
 class LevelMeter:
@@ -73,6 +81,7 @@ def play_test_tone(device: int | None) -> None:
 
 class SettingsWindow(QWidget):
     saved = Signal()
+    _copied = Signal(object)  # (added, skipped) or the error
 
     def __init__(
         self,
@@ -80,6 +89,10 @@ class SettingsWindow(QWidget):
         *,
         list_devices: Callable[[str], list[AudioDevice]],
         memory: MemoryFile,
+        knowledge: KnowledgeFolder | None = None,
+        pick_files: Callable[[], list[Path]] | None = None,
+        confirm: Callable[[str], bool] | None = None,
+        run_in_background: Callable[[Callable[[], None]], None] = spawn_thread,
         open_meter: Callable[[int | None], LevelMeter] = LevelMeter,
         play_tone: Callable[[int | None], None] = play_test_tone,
     ) -> None:
@@ -90,15 +103,29 @@ class SettingsWindow(QWidget):
         self._settings = settings
         self._env_file: Path = settings.env_file
         self._memory = memory
+        self._knowledge = knowledge or (
+            KnowledgeFolder(settings.knowledge_dir) if settings.knowledge_dir else None
+        )
+        # Injected callables only; the defaults are looked up at use time, because storing
+        # a bound method of self here would make a reference cycle that the garbage
+        # collector may break on another thread (Qt objects must die on the GUI thread).
+        self._pick_files = pick_files
+        self._confirm = confirm
+        self._run = run_in_background
         self._open_meter = open_meter
         self._play_tone = play_tone
         self._meter: LevelMeter | None = None
+        # True while documents are being copied; __main__ then reuses this window instead
+        # of deleting it under the running copy.
+        self.copying = False
 
         tabs = QTabWidget(self)
         tabs.addTab(self._audio_tab(list_devices), "Audio")
         tabs.addTab(self._voice_tab(), "Voz y conversación")
         tabs.addTab(self._activation_tab(), "Activación")
         tabs.addTab(self._memory_tab(), "Memoria")
+        if self._knowledge is not None:
+            tabs.addTab(self._knowledge_tab(), "Conocimiento")
 
         self.error = QLabel("")
         self.error.setStyleSheet("color: #B91C1C;")
@@ -185,6 +212,35 @@ class SettingsWindow(QWidget):
         layout.addWidget(delete, alignment=Qt.AlignmentFlag.AlignRight)
         return page
 
+    def _knowledge_tab(self) -> QWidget:
+        self.documents = QListWidget()
+        self.documents.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.add_button = add = QPushButton("Agregar archivos…")
+        add.clicked.connect(self._add_documents)
+        self._copied.connect(self._on_copied)
+        remove = QPushButton("Quitar seleccionados")
+        remove.clicked.connect(self._remove_documents)
+        folder = QPushButton("Abrir carpeta")
+        folder.clicked.connect(self._open_folder)
+        self._reload_documents()
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(add)
+        buttons.addWidget(folder)
+        buttons.addStretch()
+        buttons.addWidget(remove)
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        hint = QLabel(
+            "Documentos de los que Paula aprende (.md, .txt, .pdf). Los nuevos los "
+            "aprende en menos de un minuto. También puedes decirle «apréndete esto: …»."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        layout.addWidget(self.documents)
+        layout.addLayout(buttons)
+        return page
+
     # Behaviour
 
     def _device_combo(self, devices: list[AudioDevice], current: str) -> QComboBox:
@@ -241,6 +297,88 @@ class SettingsWindow(QWidget):
         except MemoryBusy:
             self.error.setText("La memoria está ocupada. Inténtalo de nuevo en un momento.")
         self._reload_facts()
+
+    def _reload_documents(self) -> None:
+        self.documents.clear()
+        names = self._knowledge.files()
+        self.documents.addItems(names)
+        if not names:
+            item = QListWidgetItem("Todavía no hay documentos.")
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.documents.addItem(item)
+
+    def _add_documents(self) -> None:
+        sources = (self._pick_files or self._ask_for_files)()
+        if not sources:
+            return
+        self.add_button.setEnabled(False)
+        self.copying = True
+        self.error.setText("Copiando…")
+
+        def work() -> None:
+            # Off the UI thread: a big PDF or a network share must not freeze Paula.
+            result: object = OSError("not copied")
+            try:
+                result = self._knowledge.add(sources)
+            except Exception as exc:
+                log.exception("Could not copy documents")
+                result = exc
+            finally:
+                try:
+                    self._copied.emit(result)  # queued to the GUI thread
+                except RuntimeError:
+                    pass  # the window was deleted meanwhile; the files are copied anyway
+
+        self._run(work)
+
+    def _on_copied(self, result) -> None:
+        self.copying = False
+        self.add_button.setEnabled(True)
+        if isinstance(result, Exception):
+            self.error.setText("No pude copiar todos los archivos a la carpeta de conocimiento.")
+        else:
+            _, skipped = result
+            self.error.setText("No se agregaron: " + ", ".join(skipped) if skipped else "")
+        self._reload_documents()  # also after a failure: some files may have been copied
+
+    def _remove_documents(self) -> None:
+        names = [
+            i.text()
+            for i in self.documents.selectedItems()
+            if i.flags() & Qt.ItemFlag.ItemIsEnabled
+        ]
+        if not names:
+            return
+        question = (
+            f"¿Quitar {len(names)} documento(s)? Paula dejará de usarlos y se borrarán "
+            "de la carpeta de conocimiento."
+        )
+        if not (self._confirm or self._ask_to_confirm)(question):
+            return
+        try:
+            self._knowledge.remove(names)
+            self.error.clear()
+        except (OSError, ValueError):
+            log.exception("Could not remove documents")
+            self.error.setText("No pude quitar alguno de los documentos.")
+        self._reload_documents()
+
+    def _open_folder(self) -> None:
+        try:
+            self._knowledge.open_in_explorer()
+        except OSError:
+            self.error.setText("No pude abrir la carpeta de conocimiento.")
+
+    def _ask_for_files(self) -> list[Path]:
+        patterns = " ".join(f"*{s}" for s in SUFFIXES)
+        names, _ = QFileDialog.getOpenFileNames(
+            self, "Agregar documentos", str(Path.home()), f"Documentos ({patterns})"
+        )
+        return [Path(n) for n in names]
+
+    def _ask_to_confirm(self, question: str) -> bool:
+        answer = QMessageBox.question(self, "Paula", question)
+        return answer == QMessageBox.StandardButton.Yes
 
     def changes(self) -> dict[str, str]:
         return {
