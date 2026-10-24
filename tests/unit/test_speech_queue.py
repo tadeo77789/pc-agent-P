@@ -39,3 +39,14 @@ def test_stop_cuts_and_reports_done():
 
     assert speaker.stopped == 1
     assert done == [True]
+
+
+def test_sentence_taken_before_stop_is_not_spoken():
+    speaker = RecordingSpeaker()
+    speech = SpeechQueue(speaker, lambda: None, threaded=False)
+    stale = ("say", "vieja", speech._generation)
+
+    speech.stop()
+    speech._handle(*stale)
+
+    assert speaker.spoken == []

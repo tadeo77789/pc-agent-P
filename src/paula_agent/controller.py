@@ -32,6 +32,11 @@ COMMANDS_TEXT = (
 )
 
 
+def _normalize(text: str) -> str:
+    """Collapse whitespace: the hub strips sentences, the final text keeps line breaks."""
+    return " ".join(text.split())
+
+
 def spawn_thread(work: Callable[[], None]) -> None:
     threading.Thread(target=work, daemon=True).start()
 
@@ -87,6 +92,7 @@ class AgentController(QObject):
         # Sentences of the reply in flight that already arrived as partial results.
         self._streamed = ""
         self._stream_bubble = None
+        self._muted = False
         self._speech = SpeechQueue(speaker, self._spoken.emit, threaded=threaded_speech)
         self._cancel = threading.Event()
         self._countdown = 0
@@ -150,6 +156,8 @@ class AgentController(QObject):
             self._cancel.set()
             self._end_countdown()
         elif self._speaking:
+            # Silence the rest of this reply too: later sentences only go to the chat.
+            self._muted = True
             self._speech.stop()
 
     def _tick(self) -> None:
@@ -227,6 +235,7 @@ class AgentController(QObject):
             # Saying something else drops the pending question.
             self._question_id = None
             self._chat.panel.clear_options()
+        self._reset_stream()
         self._busy = True
         self._idle_timer.stop()
         self._set_state(RobotState.THINKING)
@@ -248,10 +257,13 @@ class AgentController(QObject):
         self._expected = set()
         self._thinking_timer.stop()
 
-        # Text already spoken sentence by sentence is not shown or said again.
-        streamed = result.response_text.strip() in self._streamed
-        self._streamed, self._stream_bubble = "", None
-        if not streamed or not result.response_text.strip():
+        # Text already spoken sentence by sentence is not shown or said again. The final
+        # text is the last round's reply, so it is the tail of what was streamed.
+        final = _normalize(result.response_text)
+        streamed = bool(final) and self._streamed.endswith(final)
+        muted = self._muted
+        self._reset_stream()
+        if not streamed:
             self._chat.panel.add_message("assistant", result.response_text)
 
         if result.status is Status.QUESTION and result.options:
@@ -262,25 +274,25 @@ class AgentController(QObject):
         state = (
             RobotState.ANGRY if result.status is Status.ERROR else RobotState(result.robot_state)
         )
-        if (result.speak and self._speaker.enabled) or self._speaking:
+        if (result.speak and self._speaker.enabled and not muted) or self._speaking:
             # Keep the question or angry face while talking; otherwise the mouth moves.
             talking = state if state in (RobotState.QUESTION, RobotState.ANGRY) else None
             self._set_state(talking or RobotState.SPEAKING)
             self._speaking = True
-            if result.speak and not streamed:
+            if result.speak and not streamed and not muted:
                 self._speech.say(result.response_text)
             self._speech.finish()
         else:
             self._flash(state)
 
     def _on_partial(self, result: Result) -> None:
-        sentence = result.response_text.strip()
+        sentence = _normalize(result.response_text)
         self._streamed = f"{self._streamed} {sentence}".strip()
         if self._stream_bubble is None:
             self._stream_bubble = self._chat.panel.add_message("assistant", sentence)
         else:
             self._stream_bubble.setText(self._streamed)
-        if self._speaker.enabled:
+        if self._speaker.enabled and not self._muted:
             if not self._speaking:
                 self._speaking = True
                 self._set_state(RobotState.SPEAKING)
@@ -309,8 +321,15 @@ class AgentController(QObject):
 
     def _no_reply(self) -> None:
         self._expected = set()
+        self._reset_stream()
+        if self._speaking:
+            # Partials were spoken but the final never came: end the speech cleanly.
+            self._speech.stop()
         self._chat.panel.add_message("assistant", NO_REPLY_TEXT)
         self._flash(RobotState.ANGRY)
+
+    def _reset_stream(self) -> None:
+        self._streamed, self._stream_bubble, self._muted = "", None, False
 
     # Clouds and robot
 

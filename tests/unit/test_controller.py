@@ -411,3 +411,49 @@ def test_late_partials_are_ignored(parts):
 
     assert len(parts["chat"].panel.bubbles()) == bubbles
     assert parts["speaker"].spoken == []
+
+
+def partial(order, text):
+    return reply(order, text, status=Status.PENDING, partial=True)
+
+
+def test_final_with_line_breaks_is_not_repeated(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+
+    controller.result_received(partial(order, "Hola, Ola."))
+    controller.result_received(partial(order, "Todo va bien."))
+    controller.result_received(reply(order, "Hola, Ola.\n\nTodo va bien."))
+
+    assert parts["speaker"].spoken == ["Hola, Ola.", "Todo va bien."]
+
+
+def test_stream_state_is_cleared_after_timeout(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    first = parts["bus"].orders[0]
+    controller.result_received(partial(first, "Ya casi termino. Hecho."))
+    controller._no_reply()
+    assert state(parts) is RobotState.ANGRY
+    assert not controller._speaking
+
+    parts["chat"].panel.message_sent.emit("otra cosa")
+    second = parts["bus"].orders[-1]
+    controller.result_received(reply(second, "Hecho."))
+
+    assert parts["chat"].panel.bubbles()[-1].text() == "Hecho."
+
+
+def test_escape_mutes_the_rest_of_a_streamed_reply(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+    controller.result_received(partial(order, "Primera frase larga."))
+
+    controller.escape_pressed()
+    controller.result_received(partial(order, "Segunda frase larga."))
+    controller.result_received(reply(order, "Primera frase larga. Segunda frase larga."))
+
+    assert parts["speaker"].spoken == ["Primera frase larga."]
+    assert parts["chat"].panel.bubbles()[-1].text() == "Primera frase larga. Segunda frase larga."
