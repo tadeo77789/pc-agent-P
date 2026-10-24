@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from dataclasses import dataclass
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -15,6 +18,27 @@ class SettingsError(Exception):
 
 def _local_data() -> Path:
     return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "PaulaPort"
+
+
+def log_dir() -> Path:
+    return _local_data() / "logs"
+
+
+def setup_logging(level: str, name: str) -> None:
+    """Log to a rotating file (pythonw at logon has no console) and to stderr if present."""
+    log_dir().mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = [
+        RotatingFileHandler(
+            log_dir() / f"{name}.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+        )
+    ]
+    if sys.stderr is not None:
+        handlers.append(logging.StreamHandler())
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
+    )
 
 
 @dataclass(frozen=True)
