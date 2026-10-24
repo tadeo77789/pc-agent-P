@@ -68,7 +68,9 @@ class FakeStream:
 
 
 def make_player(stream, now):
-    return SoundDevicePlayer(rate=RATE, clock=lambda: now[0], open_stream=lambda rate: stream)
+    return SoundDevicePlayer(
+        rate=RATE, clock=lambda: now[0], open_stream=lambda rate, device: stream
+    )
 
 
 def test_lead_in_only_after_silence():
