@@ -71,7 +71,10 @@ def main() -> int:
         settings.whisper_model, settings.whisper_language, settings.whisper_device
     )
     speaker = Speaker(
-        settings.elevenlabs_api_key, settings.elevenlabs_voice_id, settings.elevenlabs_model
+        settings.elevenlabs_api_key,
+        settings.elevenlabs_voice_id,
+        settings.elevenlabs_model,
+        speed=settings.elevenlabs_speed,
     )
     if not speaker.enabled:
         log.warning("ELEVENLABS_API_KEY is empty: replies will only appear in the chat")

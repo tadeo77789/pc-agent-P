@@ -4,7 +4,14 @@ import pytest
 
 from paula_agent.config.settings import Settings, SettingsError
 
-NAMES = ("AGENT_SHARED_SECRET", "WAKE_WORDS", "ELEVENLABS_API_KEY", "APPS_FILE", "MODELS_DIR")
+NAMES = (
+    "AGENT_SHARED_SECRET",
+    "WAKE_WORDS",
+    "ELEVENLABS_API_KEY",
+    "ELEVENLABS_SPEED",
+    "APPS_FILE",
+    "MODELS_DIR",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +34,7 @@ def test_defaults(monkeypatch, tmp_path):
 
     assert settings.wake_words == ["paula", "paula port"]
     assert settings.elevenlabs_model == "eleven_flash_v2_5"
+    assert settings.elevenlabs_speed == 1.0
     assert settings.hotkey == "ctrl+shift+p"
     assert settings.apps_file is None
     assert settings.env_file == tmp_path / ".env"
@@ -58,3 +66,20 @@ def test_invalid_number_is_a_settings_error(monkeypatch, tmp_path):
 
     with pytest.raises(SettingsError):
         Settings.from_env(tmp_path / ".env")
+
+
+@pytest.mark.parametrize("value", ["0.5", "1.5", "rapido"])
+def test_speed_outside_range_is_a_settings_error(monkeypatch, tmp_path, value):
+    monkeypatch.setenv("AGENT_SHARED_SECRET", "x" * 32)
+    monkeypatch.setenv("ELEVENLABS_SPEED", value)
+
+    with pytest.raises(SettingsError):
+        Settings.from_env(tmp_path / ".env")
+
+
+@pytest.mark.parametrize("value", ["0.7", "1.2"])
+def test_speed_bounds_are_accepted(monkeypatch, tmp_path, value):
+    monkeypatch.setenv("AGENT_SHARED_SECRET", "x" * 32)
+    monkeypatch.setenv("ELEVENLABS_SPEED", value)
+
+    assert Settings.from_env(tmp_path / ".env").elevenlabs_speed == float(value)
