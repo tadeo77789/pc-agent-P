@@ -101,6 +101,7 @@ def main() -> int:
         foreground=foreground_window,
         quit_app=app.quit,
         listen_seconds=settings.hotkey_listen_seconds,
+        conversation_seconds=settings.conversation_seconds,
     )
     hotkey = HotkeyListener(controller.hotkey_pressed, controller.escape_pressed, settings.hotkey)
 

@@ -9,6 +9,7 @@ NAMES = (
     "WAKE_WORDS",
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_SPEED",
+    "CONVERSATION_SECONDS",
     "APPS_FILE",
     "MODELS_DIR",
 )
@@ -35,6 +36,7 @@ def test_defaults(monkeypatch, tmp_path):
     assert settings.wake_words == ["paula", "paula port"]
     assert settings.elevenlabs_model == "eleven_flash_v2_5"
     assert settings.elevenlabs_speed == 1.0
+    assert settings.conversation_seconds == 8
     assert settings.hotkey == "ctrl+shift+p"
     assert settings.apps_file is None
     assert settings.env_file == tmp_path / ".env"
@@ -83,3 +85,12 @@ def test_speed_bounds_are_accepted(monkeypatch, tmp_path, value):
     monkeypatch.setenv("ELEVENLABS_SPEED", value)
 
     assert Settings.from_env(tmp_path / ".env").elevenlabs_speed == float(value)
+
+
+@pytest.mark.parametrize("value", ["-1", "31", "mucho"])
+def test_conversation_seconds_out_of_range(monkeypatch, tmp_path, value):
+    monkeypatch.setenv("AGENT_SHARED_SECRET", "x" * 32)
+    monkeypatch.setenv("CONVERSATION_SECONDS", value)
+
+    with pytest.raises(SettingsError):
+        Settings.from_env(tmp_path / ".env")

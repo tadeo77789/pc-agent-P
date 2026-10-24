@@ -7,6 +7,7 @@ each one is turned into a Qt signal so all state changes happen on the UI thread
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from collections.abc import Callable
 
@@ -14,6 +15,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from paula_agent.activation.foreground import ExclusionPolicy, WindowInfo
 from paula_agent.audio.speech_queue import SpeechQueue
+from paula_agent.conversation import is_farewell
 from paula_agent.messaging.messages import Action, Intent, Order, Result, Source, Status
 from paula_agent.ui.robot.states import RobotState
 from paula_agent.ui.window import ChatWindow, StageWindow
@@ -22,9 +24,15 @@ log = logging.getLogger(__name__)
 
 THINKING_TIMEOUT_MS = 60_000
 FLASH_MS = {RobotState.SPEAKING: 2000, RobotState.ANGRY: 2500}
+# Pause between the end of Paula's voice and listening again, so the tail of her own
+# audio (Bluetooth adds latency) is not recorded as the user's answer.
+FOLLOW_UP_DELAY_MS = 700
+# Follow-ups per activation: background talk (a TV) must not keep the mic open forever.
+MAX_FOLLOW_UPS = 5
 
 # User-facing text, Spanish
 NO_REPLY_TEXT = "No obtuve respuesta. ¿Está corriendo el hub?"
+GOODBYE_TEXT = "¡Hasta luego!"
 COMMANDS_TEXT = (
     "Puedo abrir: {apps}. También puedo revisar el estado del PC o apagarlo (te pido "
     "confirmación antes)."
@@ -63,6 +71,7 @@ class AgentController(QObject):
         foreground: Callable[[], WindowInfo | None],
         quit_app: Callable[[], None],
         listen_seconds: int = 5,
+        conversation_seconds: float = 8.0,
         spawn: Callable[[Callable[[], None]], None] = spawn_thread,
         threaded_speech: bool = True,
     ) -> None:
@@ -79,6 +88,7 @@ class AgentController(QObject):
         self._foreground = foreground
         self._quit_app = quit_app
         self._listen_seconds = listen_seconds
+        self._conversation_seconds = conversation_seconds
         self._spawn = spawn
 
         self._busy = False
@@ -86,6 +96,10 @@ class AgentController(QObject):
         self._speaking = False
         self._asleep = False
         self._question_id: str | None = None
+        # Source of the voice conversation in progress (follow-ups need no wake word).
+        self._conversation: Source | None = None
+        self._following = False
+        self._follow_ups = 0
         # Result ids that answer the order in flight; anything else is a late reply.
         self._expected: set[str] = set()
         # Sentences of the reply in flight that already arrived as partial results.
@@ -101,6 +115,9 @@ class AgentController(QObject):
             self, singleShot=True, interval=THINKING_TIMEOUT_MS, timeout=self._no_reply
         )
         self._idle_timer = QTimer(self, singleShot=True, timeout=self._idle)
+        self._follow_up_timer = QTimer(
+            self, singleShot=True, interval=FOLLOW_UP_DELAY_MS, timeout=self._follow_up
+        )
 
         self._wake.connect(self._on_wake)
         self._hotkey.connect(self._on_hotkey)
@@ -140,18 +157,22 @@ class AgentController(QObject):
         if self._exclusion.is_excluded(self._foreground()):
             log.info("Wake word ignored in excluded app")
             return
+        self._follow_ups = 0
         self._listen(Source.VOICE)
 
     def _on_hotkey(self) -> None:
         if self._busy:
             return
         self._asleep = False
+        self._follow_ups = 0
         self._listen(Source.HOTKEY)
         self._countdown = self._listen_seconds
         self._stage.show_listen(self._countdown)
         self._countdown_timer.start()
 
     def _on_escape(self) -> None:
+        waiting = self._follow_up_timer.isActive()
+        self._end_conversation()
         if self._listening:
             self._cancel.set()
             self._end_countdown()
@@ -159,6 +180,9 @@ class AgentController(QObject):
             # Silence the rest of this reply too: later sentences only go to the chat.
             self._muted = True
             self._speech.stop()
+        elif waiting:
+            # Between the end of a reply and the follow-up recording.
+            self._idle()
 
     def _tick(self) -> None:
         self._countdown -= 1
@@ -171,7 +195,8 @@ class AgentController(QObject):
         self._countdown_timer.stop()
         self._stage.hide_listen()
 
-    def _listen(self, source: Source) -> None:
+    def _listen(self, source: Source, timeout_seconds: float | None = None) -> None:
+        timeout = self._listen_seconds if timeout_seconds is None else timeout_seconds
         self._busy = self._listening = True
         self._cancel.clear()
         self._wake_detector.pause()
@@ -180,9 +205,7 @@ class AgentController(QObject):
         def work() -> None:
             text = ""
             try:
-                audio = self._recorder.record(
-                    start_timeout_seconds=self._listen_seconds, cancel=self._cancel
-                )
+                audio = self._recorder.record(start_timeout_seconds=timeout, cancel=self._cancel)
                 if audio is not None and not self._cancel.is_set():
                     self._set_state_later(RobotState.THINKING)
                     text = self._transcriber.transcribe(audio)
@@ -198,18 +221,64 @@ class AgentController(QObject):
 
     def _on_heard(self, source: str, text: str) -> None:
         self._listening = False
+        following, self._following = self._following, False
         self._end_countdown()
         if self._cancel.is_set() or not text.strip():
+            if following:
+                self._end_conversation()  # silence after a reply ends the conversation
             # A chat order may have replaced this recording and even been answered already.
             if not self._expected and not self._speaking and not self._idle_timer.isActive():
                 self._idle()
             return
         self._chat.panel.add_message("user", text)
+        if following and is_farewell(text):
+            self._end_conversation()
+            self._say_goodbye()
+            return
+        if self._conversation_seconds > 0:
+            self._conversation = Source(source)
         self._send(Order(source=Source(source), intent=Intent.CONVERSATION, payload={"text": text}))
+
+    # Conversation mode
+
+    def _follow_up(self) -> None:
+        """Listen for the next thing the user says, without the wake word."""
+        if self._expected or self._listening:
+            return  # a new order or recording took over
+        if self._conversation is None or self._asleep or self._follow_ups >= MAX_FOLLOW_UPS:
+            self._idle()
+            return
+        if self._exclusion.is_excluded(self._foreground()):
+            # In Discord or a game the mic would pick up the user talking to others.
+            log.info("Conversation ended: excluded app in front")
+            self._idle()
+            return
+        self._follow_ups += 1
+        self._following = True
+        # Same banner as the hotkey: the mic is open again and Esc ends it.
+        self._countdown = max(1, math.ceil(self._conversation_seconds))
+        self._stage.show_listen(self._countdown)
+        self._countdown_timer.start()
+        self._listen(self._conversation, timeout_seconds=self._conversation_seconds)
+
+    def _end_conversation(self) -> None:
+        self._conversation = None
+        self._follow_up_timer.stop()
+
+    def _say_goodbye(self) -> None:
+        self._chat.panel.add_message("assistant", GOODBYE_TEXT)
+        if self._speaker.enabled:
+            self._speaking = True
+            self._set_state(RobotState.SPEAKING)
+            self._speech.say(GOODBYE_TEXT)
+            self._speech.finish()
+        else:
+            self._idle()
 
     # Chat
 
     def _on_chat_message(self, text: str) -> None:
+        self._end_conversation()  # typing switches to the chat
         if self._listening:
             # Typing wins over a recording in progress.
             self._cancel.set()
@@ -303,9 +372,14 @@ class AgentController(QObject):
     def _on_spoken(self) -> None:
         self._speaking = False
         if self._question_id is not None:
+            # Confirmations are answered with the chat buttons.
+            self._end_conversation()
             self._busy = False
             self._set_state(RobotState.QUESTION)
             self._wake_detector.resume()
+            return
+        if self._conversation is not None and not self._asleep and not self._expected:
+            self._follow_up_timer.start()
             return
         self._idle()
 
@@ -320,6 +394,7 @@ class AgentController(QObject):
             self._idle()
 
     def _no_reply(self) -> None:
+        self._end_conversation()
         self._expected = set()
         self._reset_stream()
         if self._speaking:
@@ -345,6 +420,13 @@ class AgentController(QObject):
             self._chat.hide()
             self._quit_app()
         elif cloud_id == "sleep":
+            self._end_conversation()
+            if self._listening:
+                self._cancel.set()  # stop a follow-up recording too
+            elif not self._expected and not self._speaking:
+                # Picked between a reply and its follow-up. While Paula still speaks,
+                # `_on_spoken` brings her to idle instead.
+                self._busy = False
             self._asleep = True
             self._wake_detector.pause()
             self._chat.hide()
@@ -365,6 +447,7 @@ class AgentController(QObject):
         self._stage.set_state(state)
 
     def _idle(self) -> None:
+        self._end_conversation()
         self._busy = self._listening = False
         self._set_state(RobotState.QUESTION if self._question_id else RobotState.SLEEPING)
         if not self._asleep:
