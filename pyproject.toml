@@ -13,9 +13,11 @@ dependencies = [
     "numpy",
     "pika",
     "psutil",
+    "pynput",
     "python-dotenv",
     "requests",
     "sounddevice",
+    "vosk",
 ]
 
 [project.optional-dependencies]
