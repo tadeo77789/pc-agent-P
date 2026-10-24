@@ -20,7 +20,7 @@ def update_env(path: Path, values: dict[str, str]) -> None:
     for key, value in values.items():
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
             raise ValueError(f"Invalid setting name: {key}")
-        # Any line separator (\n, \r,  ...) would let a value start a new key line.
+        # Any line separator (\n, \r, U+2028...) would let a value start a new key line.
         if len(f"x{value}x".splitlines()) != 1:
             raise ValueError(f"{key} cannot contain line breaks")
         if "${" in value:  # python-dotenv expands ${VAR} even inside quotes
