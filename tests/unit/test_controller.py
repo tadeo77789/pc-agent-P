@@ -275,3 +275,75 @@ def test_no_reply_turns_angry(parts):
 
     assert parts["chat"].panel.bubbles()[-1].text() == NO_REPLY_TEXT
     assert state(parts) is RobotState.ANGRY
+
+
+def test_typing_drops_pending_question(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+    controller.result_received(
+        reply(
+            order,
+            "¿Confirmas?",
+            status=Status.QUESTION,
+            robot_state=RobotState.QUESTION,
+            options=["Sí, confirmo", "No"],
+        )
+    )
+
+    parts["chat"].panel.message_sent.emit("olvídalo")
+    new_order = parts["bus"].orders[-1]
+    controller.result_received(reply(new_order, "Vale."))
+
+    assert new_order.intent is Intent.CONVERSATION
+    assert state(parts) is RobotState.SLEEPING
+    assert parts["chat"].panel._options_box.isHidden()
+
+
+def test_confirm_reply_uses_original_order_id(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+    controller.result_received(
+        reply(
+            order,
+            "¿Confirmas?",
+            status=Status.QUESTION,
+            robot_state=RobotState.QUESTION,
+            options=["Sí, confirmo", "No"],
+        )
+    )
+    parts["chat"].panel.option_chosen.emit("Sí, confirmo")
+
+    controller.result_received(reply(order, "Apagando."))
+
+    assert parts["speaker"].spoken[-1] == "Apagando."
+    assert state(parts) is RobotState.SLEEPING
+
+
+def test_late_reply_is_shown_but_does_not_change_state(parts):
+    controller = make(parts)
+    parts["chat"].panel.message_sent.emit("hola")
+    order = parts["bus"].orders[0]
+    controller._no_reply()
+
+    controller.result_received(reply(order, "Llegué tarde"))
+
+    assert parts["speaker"].spoken == []
+    assert parts["chat"].panel.bubbles()[-1].text() == "Llegué tarde"
+    assert state(parts) is RobotState.ANGRY
+
+
+def test_speaker_exception_returns_to_idle(parts):
+    class BrokenSpeaker(FakeSpeaker):
+        def speak(self, text):
+            raise RuntimeError("audio device gone")
+
+    parts["speaker"] = BrokenSpeaker()
+    controller = make(parts)
+    controller.wake_word_heard()
+
+    controller.result_received(reply(parts["bus"].orders[0]))
+
+    assert state(parts) is RobotState.SLEEPING
+    assert not parts["wake_detector"].paused
