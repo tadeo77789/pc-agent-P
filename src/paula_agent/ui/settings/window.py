@@ -7,6 +7,7 @@ effect the same way. User-facing text is Spanish.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -45,6 +46,10 @@ METER_RATE = 16000
 TEST_TONE_SECONDS = 0.6
 
 
+def spawn_thread(work: Callable[[], None]) -> None:
+    threading.Thread(target=work, daemon=True).start()
+
+
 class LevelMeter:
     """Opens the chosen microphone and keeps its latest loudness (0..1)."""
 
@@ -76,6 +81,7 @@ def play_test_tone(device: int | None) -> None:
 
 class SettingsWindow(QWidget):
     saved = Signal()
+    _copied = Signal(object)  # (added, skipped) or the error
 
     def __init__(
         self,
@@ -86,6 +92,7 @@ class SettingsWindow(QWidget):
         knowledge: KnowledgeFolder | None = None,
         pick_files: Callable[[], list[Path]] | None = None,
         confirm: Callable[[str], bool] | None = None,
+        run_in_background: Callable[[Callable[[], None]], None] = spawn_thread,
         open_meter: Callable[[int | None], LevelMeter] = LevelMeter,
         play_tone: Callable[[int | None], None] = play_test_tone,
     ) -> None:
@@ -96,9 +103,15 @@ class SettingsWindow(QWidget):
         self._settings = settings
         self._env_file: Path = settings.env_file
         self._memory = memory
-        self._knowledge = knowledge or KnowledgeFolder(settings.knowledge_dir)
-        self._pick_files = pick_files or self._ask_for_files
-        self._confirm = confirm or self._ask_to_confirm
+        self._knowledge = knowledge or (
+            KnowledgeFolder(settings.knowledge_dir) if settings.knowledge_dir else None
+        )
+        # Injected callables only; the defaults are looked up at use time, because storing
+        # a bound method of self here would make a reference cycle that the garbage
+        # collector may break on another thread (Qt objects must die on the GUI thread).
+        self._pick_files = pick_files
+        self._confirm = confirm
+        self._run = run_in_background
         self._open_meter = open_meter
         self._play_tone = play_tone
         self._meter: LevelMeter | None = None
@@ -108,7 +121,8 @@ class SettingsWindow(QWidget):
         tabs.addTab(self._voice_tab(), "Voz y conversación")
         tabs.addTab(self._activation_tab(), "Activación")
         tabs.addTab(self._memory_tab(), "Memoria")
-        tabs.addTab(self._knowledge_tab(), "Conocimiento")
+        if self._knowledge is not None:
+            tabs.addTab(self._knowledge_tab(), "Conocimiento")
 
         self.error = QLabel("")
         self.error.setStyleSheet("color: #B91C1C;")
@@ -198,8 +212,9 @@ class SettingsWindow(QWidget):
     def _knowledge_tab(self) -> QWidget:
         self.documents = QListWidget()
         self.documents.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        add = QPushButton("Agregar archivos…")
+        self.add_button = add = QPushButton("Agregar archivos…")
         add.clicked.connect(self._add_documents)
+        self._copied.connect(self._on_copied)
         remove = QPushButton("Quitar seleccionados")
         remove.clicked.connect(self._remove_documents)
         folder = QPushButton("Abrir carpeta")
@@ -290,19 +305,31 @@ class SettingsWindow(QWidget):
             self.documents.addItem(item)
 
     def _add_documents(self) -> None:
-        sources = self._pick_files()
+        sources = (self._pick_files or self._ask_for_files)()
         if not sources:
             return
-        try:
-            _, skipped = self._knowledge.add(sources)
-        except OSError:
-            log.exception("Could not copy documents")
-            self.error.setText("No pude copiar los archivos a la carpeta de conocimiento.")
-            return
-        self.error.setText(
-            "No se agregaron (formato no soportado): " + ", ".join(skipped) if skipped else ""
-        )
-        self._reload_documents()
+        self.add_button.setEnabled(False)
+        self.error.setText("Copiando…")
+
+        def work() -> None:
+            # Off the UI thread: a big PDF or a network share must not freeze Paula.
+            try:
+                result = self._knowledge.add(sources)
+            except OSError as exc:
+                log.exception("Could not copy documents")
+                result = exc
+            self._copied.emit(result)
+
+        self._run(work)
+
+    def _on_copied(self, result) -> None:
+        self.add_button.setEnabled(True)
+        if isinstance(result, Exception):
+            self.error.setText("No pude copiar todos los archivos a la carpeta de conocimiento.")
+        else:
+            _, skipped = result
+            self.error.setText("No se agregaron: " + ", ".join(skipped) if skipped else "")
+        self._reload_documents()  # also after a failure: some files may have been copied
 
     def _remove_documents(self) -> None:
         names = [
@@ -316,7 +343,7 @@ class SettingsWindow(QWidget):
             f"¿Quitar {len(names)} documento(s)? Paula dejará de usarlos y se borrarán "
             "de la carpeta de conocimiento."
         )
-        if not self._confirm(question):
+        if not (self._confirm or self._ask_to_confirm)(question):
             return
         try:
             self._knowledge.remove(names)

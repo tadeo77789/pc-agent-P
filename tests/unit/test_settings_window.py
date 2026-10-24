@@ -3,6 +3,7 @@ from typing import ClassVar
 
 import pytest
 from dotenv import dotenv_values
+from PySide6.QtWidgets import QTabWidget
 
 from paula_agent.audio.devices import AudioDevice
 from paula_agent.config.knowledge_folder import KnowledgeFolder
@@ -33,7 +34,13 @@ class FakeMeter:
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    for name in ("MIC_DEVICE", "SPEAKER_DEVICE", "ELEVENLABS_SPEED", "CONVERSATION_SECONDS"):
+    for name in (
+        "MIC_DEVICE",
+        "SPEAKER_DEVICE",
+        "ELEVENLABS_SPEED",
+        "CONVERSATION_SECONDS",
+        "KNOWLEDGE_DIR",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AGENT_SHARED_SECRET", "x" * 32)
     path = tmp_path / ".env"
@@ -167,6 +174,7 @@ def test_knowledge_tab_adds_and_removes_documents(qapp, env, tmp_path):
         env,
         tmp_path,
         pick_files=lambda: [doc, tmp_path / "foto.png"],
+        run_in_background=lambda work: work(),
         confirm=lambda question: answers.append(question) or True,
     )
     assert window.documents.item(0).text() == "Todavía no hay documentos."
@@ -190,3 +198,17 @@ def test_cancelled_removal_keeps_the_document(qapp, env, tmp_path):
     window._remove_documents()
 
     assert folder.files() == ["guia.md"]
+
+
+def test_knowledge_off_hides_the_tab(qapp, env, tmp_path, monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_DIR", "off")
+    window = SettingsWindow(
+        Settings.from_env(env),
+        list_devices=lambda kind: DEVICES[kind],
+        memory=MemoryFile(tmp_path / "none.sqlite3"),
+        open_meter=FakeMeter,
+    )
+
+    tabs = window.findChild(QTabWidget)
+    assert "Conocimiento" not in [tabs.tabText(i) for i in range(tabs.count())]
+    window.close()

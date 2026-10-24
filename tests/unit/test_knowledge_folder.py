@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from paula_agent.config.knowledge_folder import KnowledgeFolder
@@ -22,7 +24,7 @@ def test_add_copies_supported_files_without_overwriting(folder, tmp_path):
     added, skipped = folder.add([source(tmp_path, "guia.md", "dos"), source(tmp_path, "foto.png")])
 
     assert added == ["guia (2).md"]
-    assert skipped == ["foto.png"]
+    assert skipped == ["foto.png (formato no soportado)"]
     assert folder.files() == ["guia (2).md", "guia.md"]
     assert (folder.path / "guia.md").read_text(encoding="utf-8") == "uno"
     assert not list(folder.path.glob("*.partial"))
@@ -51,3 +53,28 @@ def test_remove_only_inside_the_folder(folder, tmp_path):
 
 def test_missing_folder_lists_nothing(folder):
     assert folder.files() == []
+
+
+def test_files_over_the_hub_limit_are_skipped(folder, tmp_path, monkeypatch):
+    import paula_agent.config.knowledge_folder as module
+
+    monkeypatch.setattr(module, "MAX_FILE_BYTES", 5)
+    added, skipped = folder.add([source(tmp_path, "grande.pdf", "mas de cinco")])
+
+    assert added == []
+    assert skipped == ["grande.pdf (más de 20 MB)"]
+
+
+def test_failed_copy_leaves_no_partial_file(folder, tmp_path, monkeypatch):
+    import paula_agent.config.knowledge_folder as module
+
+    def broken(src, dst):
+        Path(dst).write_text("medio", encoding="utf-8")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(module.shutil, "copyfile", broken)
+
+    with pytest.raises(OSError):
+        folder.add([source(tmp_path, "guia.md")])
+
+    assert list(folder.path.iterdir()) == []
