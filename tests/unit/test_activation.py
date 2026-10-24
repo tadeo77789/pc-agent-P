@@ -18,6 +18,7 @@ def test_listed_apps_are_excluded():
 
     assert policy.is_excluded(window("Discord.exe"))
     assert policy.is_excluded(window("ms-teams.exe"))
+    assert policy.is_excluded(window("PioneerGame.exe"))  # Arc Raiders
     assert not policy.is_excluded(window("chrome.exe"))
 
 

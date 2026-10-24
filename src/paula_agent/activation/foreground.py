@@ -11,7 +11,13 @@ import psutil
 
 log = logging.getLogger(__name__)
 
-DEFAULT_EXCLUDED = ("discord.exe", "zoom.exe", "ms-teams.exe", "teams.exe")
+DEFAULT_EXCLUDED = (
+    "discord.exe",
+    "zoom.exe",
+    "ms-teams.exe",
+    "teams.exe",
+    "pioneergame.exe",  # Arc Raiders, also excluded when windowed
+)
 # Desktop and shell windows cover the whole screen but are not games.
 SHELL_CLASSES = ("Progman", "WorkerW", "Shell_TrayWnd")
 
