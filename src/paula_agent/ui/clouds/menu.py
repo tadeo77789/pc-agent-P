@@ -18,6 +18,7 @@ from paula_agent.ui import theme
 
 # (id, label, corner); labels are user-facing, in Spanish
 CLOUDS = (
+    ("settings", "⚙️ Configuración", "top"),
     ("chat", "💬 Abrir chat", "top-left"),
     ("commands", "⚡ Ver comandos", "top-right"),
     ("quit", "🔌 Apagar Paula", "bottom-left"),
@@ -144,6 +145,10 @@ class CloudMenu(QWidget):
 
     def _corner_position(self, button: CloudButton, corner: str) -> QPoint:
         robot = self._robot_rect
+        if corner == "top":
+            # Centered above the two top clouds.
+            x = robot.center().x() - button.width() // 2
+            return QPoint(x, robot.top() - 2 * (GAP + button.height()))
         if corner.endswith("left"):
             x = robot.left() + OVERLAP - button.width()
         else:

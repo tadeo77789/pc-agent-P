@@ -111,6 +111,7 @@ class StageWindow(QWidget):
         self.robot.set_state(state)
 
     def show_listen(self, seconds: int) -> None:
+        self.clouds.close_menu()  # the top cloud would sit under the banner
         # User-facing banner, Spanish
         self._listen.setText(
             f"Escuchando… <b style='color:{theme.CLOUD_HOVER}'>{seconds}</b>s · ESC para cancelar"
