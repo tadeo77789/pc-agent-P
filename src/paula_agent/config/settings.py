@@ -48,6 +48,7 @@ class Settings:
     elevenlabs_api_key: str
     elevenlabs_voice_id: str
     elevenlabs_model: str
+    elevenlabs_speed: float
     whisper_model: str
     whisper_language: str
     whisper_device: str
@@ -72,8 +73,11 @@ class Settings:
         try:
             min_confidence = float(os.environ.get("WAKE_WORD_MIN_CONFIDENCE") or 0.85)
             listen_seconds = int(os.environ.get("HOTKEY_LISTEN_SECONDS") or 5)
+            speed = float(os.environ.get("ELEVENLABS_SPEED") or 1.0)
         except ValueError as exc:
             raise SettingsError(f"Invalid number in .env: {exc}") from exc
+        if not 0.7 <= speed <= 1.2:
+            raise SettingsError("ELEVENLABS_SPEED must be between 0.7 and 1.2")
         whisper_device = (os.environ.get("WHISPER_DEVICE") or "auto").lower()
         if whisper_device not in ("auto", "cuda", "cpu"):
             raise SettingsError("WHISPER_DEVICE must be auto, cuda or cpu")
@@ -83,6 +87,7 @@ class Settings:
             elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY", ""),
             elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "86V9x9hrQds83qf7zaGn"),
             elevenlabs_model=os.environ.get("ELEVENLABS_MODEL", "eleven_flash_v2_5"),
+            elevenlabs_speed=speed,
             whisper_model=os.environ.get("WHISPER_MODEL", "small"),
             whisper_language=os.environ.get("WHISPER_LANGUAGE", "es"),
             whisper_device=whisper_device,
