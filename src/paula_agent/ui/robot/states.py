@@ -1,21 +1,14 @@
 """Robot states and palette, taken from prototypes/paula_estilos.html."""
 
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
+
+# Same enum as `robot_state` in the hub result message.
+from paula_agent.messaging.messages import RobotState
 
 ASSETS_DIR = Path(__file__).resolve().parents[4] / "assets" / "robot"
 
-
-class RobotState(str, Enum):
-    """Values match `robot_state` in the hub result message."""
-
-    SLEEPING = "sleeping"
-    LISTENING = "listening"
-    THINKING = "thinking"
-    SPEAKING = "speaking"
-    QUESTION = "question"
-    ANGRY = "angry"
+__all__ = ["STATE_STYLES", "RobotState", "StateStyle", "svg_path"]
 
 
 @dataclass(frozen=True)

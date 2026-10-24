@@ -1,0 +1,306 @@
+"""Wires activation, audio, the hub and the UI together.
+
+Inputs arrive from many threads (wake word, hotkey, RabbitMQ, audio workers);
+each one is turned into a Qt signal so all state changes happen on the UI thread.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from collections.abc import Callable
+from pathlib import Path
+
+from PySide6.QtCore import QObject, QTimer, Signal
+
+from paula_agent.activation.foreground import ExclusionPolicy, WindowInfo
+from paula_agent.messaging.messages import Action, Intent, Order, Result, Source, Status
+from paula_agent.ui.robot.states import RobotState
+from paula_agent.ui.window import ChatWindow, StageWindow
+
+log = logging.getLogger(__name__)
+
+THINKING_TIMEOUT_MS = 60_000
+FLASH_MS = {RobotState.SPEAKING: 2000, RobotState.ANGRY: 2500}
+
+# User-facing text, Spanish
+NO_REPLY_TEXT = "No obtuve respuesta. ¿Está corriendo el hub?"
+COMMANDS_TEXT = (
+    "Puedo abrir: {apps}. También puedo revisar el estado del PC o apagarlo (te pido "
+    "confirmación antes)."
+)
+
+
+def spawn_thread(work: Callable[[], None]) -> None:
+    threading.Thread(target=work, daemon=True).start()
+
+
+class AgentController(QObject):
+    _wake = Signal()
+    _hotkey = Signal()
+    _escape = Signal()
+    _heard = Signal(str, str)  # source, text ("" when nothing was heard)
+    _result = Signal(object)
+    _spoken = Signal()
+
+    def __init__(
+        self,
+        stage: StageWindow,
+        chat: ChatWindow,
+        *,
+        bus,
+        recorder,
+        transcriber,
+        speaker,
+        runner,
+        wake_detector,
+        exclusion: ExclusionPolicy,
+        foreground: Callable[[], WindowInfo | None],
+        open_settings: Callable[[], None],
+        listen_seconds: int = 5,
+        spawn: Callable[[Callable[[], None]], None] = spawn_thread,
+    ) -> None:
+        super().__init__()
+        self._stage = stage
+        self._chat = chat
+        self._bus = bus
+        self._recorder = recorder
+        self._transcriber = transcriber
+        self._speaker = speaker
+        self._runner = runner
+        self._wake_detector = wake_detector
+        self._exclusion = exclusion
+        self._foreground = foreground
+        self._open_settings = open_settings
+        self._listen_seconds = listen_seconds
+        self._spawn = spawn
+
+        self._busy = False
+        self._listening = False
+        self._asleep = False
+        self._question_id: str | None = None
+        self._cancel = threading.Event()
+        self._countdown = 0
+
+        self._countdown_timer = QTimer(self, interval=1000, timeout=self._tick)
+        self._thinking_timer = QTimer(
+            self, singleShot=True, interval=THINKING_TIMEOUT_MS, timeout=self._no_reply
+        )
+        self._idle_timer = QTimer(self, singleShot=True, timeout=self._idle)
+
+        self._wake.connect(self._on_wake)
+        self._hotkey.connect(self._on_hotkey)
+        self._escape.connect(self._on_escape)
+        self._heard.connect(self._on_heard)
+        self._result.connect(self._on_result)
+        self._spoken.connect(self._on_spoken)
+        stage.cloud_picked.connect(self._on_cloud)
+        stage.robot.clicked.connect(self._on_robot_clicked)
+        chat.panel.message_sent.connect(self._on_chat_message)
+        chat.panel.option_chosen.connect(self._on_option)
+
+    # Thread-safe entry points
+
+    def wake_word_heard(self) -> None:
+        self._wake.emit()
+
+    def hotkey_pressed(self) -> None:
+        self._hotkey.emit()
+
+    def escape_pressed(self) -> None:
+        self._escape.emit()
+
+    def result_received(self, result: Result) -> None:
+        self._result.emit(result)
+
+    def action_received(self, action: Action) -> None:
+        """Runs on the bus thread; commands do not touch the UI."""
+        self._bus.publish_event(self._runner.run(action))
+
+    # Activation
+
+    def _on_wake(self) -> None:
+        if self._busy or self._asleep:
+            return
+        if self._exclusion.is_excluded(self._foreground()):
+            log.info("Wake word ignored in excluded app")
+            return
+        self._listen(Source.VOICE)
+
+    def _on_hotkey(self) -> None:
+        if self._busy:
+            return
+        self._asleep = False
+        self._listen(Source.HOTKEY)
+        self._countdown = self._listen_seconds
+        self._stage.show_listen(self._countdown)
+        self._countdown_timer.start()
+
+    def _on_escape(self) -> None:
+        if self._listening:
+            self._cancel.set()
+            self._end_countdown()
+        elif self._stage.robot.state is RobotState.SPEAKING:
+            self._speaker.stop()
+
+    def _tick(self) -> None:
+        self._countdown -= 1
+        if self._countdown <= 0:
+            self._end_countdown()
+        else:
+            self._stage.show_listen(self._countdown)
+
+    def _end_countdown(self) -> None:
+        self._countdown_timer.stop()
+        self._stage.hide_listen()
+
+    def _listen(self, source: Source) -> None:
+        self._busy = self._listening = True
+        self._cancel.clear()
+        self._wake_detector.pause()
+        self._set_state(RobotState.LISTENING)
+
+        def work() -> None:
+            text = ""
+            try:
+                audio = self._recorder.record(
+                    start_timeout_seconds=self._listen_seconds, cancel=self._cancel
+                )
+                if audio is not None and not self._cancel.is_set():
+                    self._set_state_later(RobotState.THINKING)
+                    text = self._transcriber.transcribe(audio)
+            except Exception:
+                log.exception("Listening failed")
+            self._heard.emit(source.value, text)
+
+        self._spawn(work)
+
+    def _set_state_later(self, state: RobotState) -> None:
+        # Called from worker threads: the stage is touched on the UI thread only.
+        QTimer.singleShot(0, self, lambda: self._set_state(state))
+
+    def _on_heard(self, source: str, text: str) -> None:
+        self._listening = False
+        self._end_countdown()
+        if self._cancel.is_set() or not text.strip():
+            self._idle()
+            return
+        self._chat.panel.add_message("user", text)
+        self._send(Order(source=Source(source), intent=Intent.CONVERSATION, payload={"text": text}))
+
+    # Chat
+
+    def _on_chat_message(self, text: str) -> None:
+        self._send(Order(source=Source.CHAT, intent=Intent.CONVERSATION, payload={"text": text}))
+
+    def _on_option(self, option: str) -> None:
+        reply_to, self._question_id = self._question_id, None
+        self._send(
+            Order(
+                source=Source.CHAT,
+                intent=Intent.CONFIRM,
+                payload={"text": option, "reply_to": reply_to},
+            )
+        )
+
+    def _send(self, order: Order) -> None:
+        self._busy = True
+        self._idle_timer.stop()
+        self._set_state(RobotState.THINKING)
+        self._bus.publish_order(order)
+        self._thinking_timer.start()
+
+    # Replies from the hub
+
+    def _on_result(self, result: Result) -> None:
+        self._thinking_timer.stop()
+        self._chat.panel.add_message("assistant", result.response_text)
+
+        if result.status is Status.QUESTION and result.options:
+            self._question_id = result.id
+            self._chat.panel.show_options(result.options)
+            self._chat.open_next_to(self._stage)
+
+        state = (
+            RobotState.ANGRY if result.status is Status.ERROR else RobotState(result.robot_state)
+        )
+        if result.speak and self._speaker.enabled:
+            # Keep the question or angry face while talking; otherwise the mouth moves.
+            talking = state if state in (RobotState.QUESTION, RobotState.ANGRY) else None
+            self._set_state(talking or RobotState.SPEAKING)
+            self._spawn(lambda: self._speak(result.response_text))
+        else:
+            self._flash(state)
+
+    def _speak(self, text: str) -> None:
+        try:
+            self._speaker.speak(text)
+        finally:
+            self._spoken.emit()
+
+    def _on_spoken(self) -> None:
+        if self._question_id is not None:
+            self._busy = False
+            self._wake_detector.resume()
+            return
+        self._idle()
+
+    def _flash(self, state: RobotState) -> None:
+        self._set_state(state)
+        if state is RobotState.QUESTION:
+            self._busy = False
+            self._wake_detector.resume()
+        elif state in FLASH_MS:
+            self._idle_timer.start(FLASH_MS[state])
+        else:
+            self._idle()
+
+    def _no_reply(self) -> None:
+        self._chat.panel.add_message("assistant", NO_REPLY_TEXT)
+        self._flash(RobotState.ANGRY)
+
+    # Clouds and robot
+
+    def _on_cloud(self, cloud_id: str) -> None:
+        if cloud_id == "chat":
+            self._chat.open_next_to(self._stage)
+        elif cloud_id == "commands":
+            apps = ", ".join(self._runner.app_names)
+            self._chat.panel.add_message("assistant", COMMANDS_TEXT.format(apps=apps))
+            self._chat.open_next_to(self._stage)
+        elif cloud_id == "settings":
+            self._open_settings()
+        elif cloud_id == "sleep":
+            self._asleep = True
+            self._wake_detector.pause()
+            self._chat.hide()
+            self._set_state(RobotState.SLEEPING)
+
+    def _on_robot_clicked(self) -> None:
+        if self._asleep:
+            self._asleep = False
+            self._wake_detector.resume()
+
+    # State
+
+    def _set_state(self, state: RobotState) -> None:
+        self._stage.set_state(state)
+
+    def _idle(self) -> None:
+        self._busy = self._listening = False
+        self._set_state(RobotState.QUESTION if self._question_id else RobotState.SLEEPING)
+        if not self._asleep:
+            self._wake_detector.resume()
+
+    @property
+    def asleep(self) -> bool:
+        return self._asleep
+
+
+def settings_opener(path: Path) -> Callable[[], None]:
+    def open_settings() -> None:
+        import subprocess
+
+        subprocess.Popen(["notepad.exe", str(path)])
+
+    return open_settings
