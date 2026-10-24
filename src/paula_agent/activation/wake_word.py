@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 MODEL_NAME = "vosk-model-small-es-0.42"
 MODEL_URL = f"https://alphacephei.com/vosk/models/{MODEL_NAME}.zip"
 SAMPLE_RATE = 16000
+RETRY_SECONDS = 2.0
 
 
 def matches(result: dict, wake_words: list[str], min_confidence: float) -> bool:
@@ -99,17 +100,25 @@ class WakeWordDetector:
                 self._stopping.wait(0.2)
                 continue
             recognizer.Reset()
-            with sd.RawInputStream(
-                samplerate=SAMPLE_RATE,
-                channels=1,
-                dtype="int16",
-                blocksize=4000,
-                device=self._device,
-            ) as stream:
-                while not self._stopping.is_set() and not self._paused.is_set():
-                    data, _ = stream.read(4000)
-                    if recognizer.AcceptWaveform(bytes(data)):
-                        result = json.loads(recognizer.Result())
-                        if matches(result, self._wake_words, self._min_confidence):
-                            log.info("Wake word heard")
-                            self._on_wake()
+            try:
+                self._listen(sd, recognizer)
+            except Exception:
+                # Headset unplugged, device busy...: keep retrying instead of dying.
+                log.exception("Wake-word microphone failed; retrying in %ss", RETRY_SECONDS)
+                self._stopping.wait(RETRY_SECONDS)
+
+    def _listen(self, sd, recognizer) -> None:
+        with sd.RawInputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=4000,
+            device=self._device,
+        ) as stream:
+            while not self._stopping.is_set() and not self._paused.is_set():
+                data, _ = stream.read(4000)
+                if recognizer.AcceptWaveform(bytes(data)):
+                    result = json.loads(recognizer.Result())
+                    if matches(result, self._wake_words, self._min_confidence):
+                        log.info("Wake word heard")
+                        self._on_wake()
