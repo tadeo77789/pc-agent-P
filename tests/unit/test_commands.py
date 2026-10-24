@@ -99,3 +99,14 @@ def test_os_error_becomes_error_event(recorder):
 
     assert event.status is Status.ERROR
     assert "not found" in event.output
+
+
+def test_subprocess_failure_still_returns_error_event(recorder):
+    def failing_run(args, check):
+        raise subprocess.CalledProcessError(1190, args)
+
+    runner = CommandRunner({}, opener=recorder.opener, run=failing_run)
+
+    event = runner.run(action("shutdown_pc", confirmed=True))
+
+    assert event.status is Status.ERROR

@@ -15,7 +15,7 @@ from paula_agent.audio.recorder import Recorder
 from paula_agent.audio.stt import Transcriber
 from paula_agent.audio.tts import Speaker
 from paula_agent.commands.runner import CommandRunner, load_apps
-from paula_agent.config.settings import Settings, SettingsError
+from paula_agent.config.settings import Settings, SettingsError, log_dir, setup_logging
 from paula_agent.controller import AgentController, settings_opener
 from paula_agent.messaging.bus import AgentBus
 from paula_agent.ui.window import ChatWindow, StageWindow
@@ -55,12 +55,13 @@ def main() -> int:
     try:
         settings = Settings.from_env()
     except SettingsError as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
+        # pythonw has no console: leave the error where it can be found.
+        log_dir().mkdir(parents=True, exist_ok=True)
+        (log_dir() / "agent-config-error.txt").write_text(str(exc), encoding="utf-8")
+        if sys.stderr is not None:
+            print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    setup_logging(settings.log_level, "agent")
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
@@ -80,6 +81,7 @@ def main() -> int:
         settings.agent_shared_secret,
         on_result=lambda result: controller.result_received(result),
         on_action=lambda action: controller.action_received(action),
+        seen_actions_path=settings.models_dir.parent / "seen_actions.txt",
     )
     controller = AgentController(
         stage,

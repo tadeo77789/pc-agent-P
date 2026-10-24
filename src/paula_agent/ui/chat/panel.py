@@ -23,6 +23,7 @@ class Bubble(QLabel):
     def __init__(self, text: str, role: str) -> None:
         super().__init__(text)
         self.role = role
+        self.setTextFormat(Qt.TextFormat.PlainText)  # never render tags from replies
         self.setWordWrap(True)
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         user = role == "user"

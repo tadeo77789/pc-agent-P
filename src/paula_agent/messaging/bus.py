@@ -7,6 +7,7 @@ import logging
 import threading
 from collections import deque
 from collections.abc import Callable
+from pathlib import Path
 
 import pika
 from pika.adapters.blocking_connection import BlockingChannel, BlockingConnection
@@ -14,7 +15,7 @@ from pika.exceptions import AMQPError
 
 from paula_agent.messaging import topology
 from paula_agent.messaging.messages import Action, Event, Order, Result
-from paula_agent.messaging.signing import InvalidSignature, sign, verify
+from paula_agent.messaging.signing import InvalidSignature, SeenIds, sign, verify
 
 log = logging.getLogger(__name__)
 
@@ -36,12 +37,16 @@ class AgentBus:
         on_action: Callable[[Action], None],
         *,
         reconnect_delay: float = 5.0,
+        seen_actions_path: Path | None = None,
     ) -> None:
         self._params = pika.URLParameters(url)
         self._secret = secret
         self._on_result = on_result
         self._on_action = on_action
         self._reconnect_delay = reconnect_delay
+        # Actions are remembered on disk so a captured shutdown cannot be replayed later.
+        self._seen_actions = SeenIds(path=seen_actions_path)
+        self._seen_results = SeenIds()
         self._connection: BlockingConnection | None = None
         self._channel: BlockingChannel | None = None
         self._buffer: deque[tuple[str, bytes]] = deque(maxlen=MAX_BUFFERED)
@@ -79,10 +84,18 @@ class AgentBus:
                 self._buffer.append((key, body))
                 return
         try:
-            connection.add_callback_threadsafe(lambda: self._send(key, body))
+            connection.add_callback_threadsafe(lambda: self._send_or_buffer(key, body))
         except AMQPError:
             with self._lock:
                 self._buffer.append((key, body))
+
+    def _send_or_buffer(self, key: str, body: bytes) -> None:
+        try:
+            self._send(key, body)
+        except AMQPError:
+            with self._lock:
+                self._buffer.append((key, body))
+            raise
 
     def _send(self, key: str, body: bytes) -> None:
         assert self._channel is not None
@@ -105,6 +118,9 @@ class AgentBus:
                 log.warning(
                     "RabbitMQ unavailable (%s); retrying in %ss", exc, self._reconnect_delay
                 )
+            except Exception:
+                # Never let the bus thread die: later orders would be lost silently.
+                log.exception("Bus error; reconnecting in %ss", self._reconnect_delay)
             finally:
                 with self._lock:
                     self._connection = self._channel = None
@@ -115,14 +131,23 @@ class AgentBus:
         channel = connection.channel()
         topology.declare(channel)
         channel.basic_qos(prefetch_count=1)
-        channel.basic_consume("agent.results", self._handler(Result.from_dict, self._on_result))
-        channel.basic_consume("agent.actions", self._handler(Action.from_dict, self._on_action))
+        channel.basic_consume(
+            "agent.results", self._handler(Result.from_dict, self._on_result, self._seen_results)
+        )
+        channel.basic_consume(
+            "agent.actions", self._handler(Action.from_dict, self._on_action, self._seen_actions)
+        )
         with self._lock:
             self._connection, self._channel = connection, channel
             pending = list(self._buffer)
             self._buffer.clear()
-        for key, body in pending:
-            self._send(key, body)
+        for i, (key, body) in enumerate(pending):
+            try:
+                self._send(key, body)
+            except AMQPError:
+                with self._lock:
+                    self._buffer.extendleft(reversed(pending[i:]))
+                raise
         log.info("Connected to RabbitMQ")
         try:
             channel.start_consuming()
@@ -130,15 +155,18 @@ class AgentBus:
             if connection.is_open:
                 connection.close()
 
-    def _handler(self, parse, callback):
+    def _handler(self, parse, callback, seen: SeenIds):
         def on_message(channel, method, properties, body: bytes) -> None:
             # Ack first: a redelivered action (e.g. shutdown) must never run twice.
             channel.basic_ack(method.delivery_tag)
             try:
                 verify(self._secret, body, properties.headers)
                 message = parse(json.loads(body))
-            except (InvalidSignature, ValueError, KeyError) as exc:
+            except (InvalidSignature, ValueError, KeyError, TypeError, AttributeError) as exc:
                 log.warning("Dropping invalid message on %s: %s", method.routing_key, exc)
+                return
+            if not seen.add(message.id):
+                log.warning("Dropping replayed message %s", message.id)
                 return
             try:
                 callback(message)

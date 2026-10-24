@@ -59,8 +59,16 @@ def test_agent_receives_signed_action_and_publishes_order():
             body,
             pika.BasicProperties(headers=sign(SECRET, body)),
         )
+        # Replay of the same signed action must be ignored.
+        channel.basic_publish(
+            topology.EXCHANGE,
+            topology.ACTION_KEY,
+            body,
+            pika.BasicProperties(headers=sign(SECRET, body)),
+        )
         channel.basic_publish(topology.EXCHANGE, topology.ACTION_KEY, b'{"unsigned": true}')
         assert wait_for(lambda: actions, timeout=5)
+        time.sleep(0.5)
         assert actions == [action]
 
         bus.publish_order(

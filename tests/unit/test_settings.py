@@ -50,3 +50,11 @@ def test_empty_optional_paths_use_defaults(monkeypatch, tmp_path):
 
     assert settings.apps_file is None
     assert settings.models_dir.name == "models"
+
+
+def test_invalid_number_is_a_settings_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_SHARED_SECRET", "x" * 32)
+    monkeypatch.setenv("HOTKEY_LISTEN_SECONDS", "cinco")
+
+    with pytest.raises(SettingsError):
+        Settings.from_env(tmp_path / ".env")

@@ -77,8 +77,11 @@ class AgentController(QObject):
 
         self._busy = False
         self._listening = False
+        self._speaking = False
         self._asleep = False
         self._question_id: str | None = None
+        # Result ids that answer the order in flight; anything else is a late reply.
+        self._expected: set[str] = set()
         self._cancel = threading.Event()
         self._countdown = 0
 
@@ -140,7 +143,7 @@ class AgentController(QObject):
         if self._listening:
             self._cancel.set()
             self._end_countdown()
-        elif self._stage.robot.state is RobotState.SPEAKING:
+        elif self._speaking:
             self._speaker.stop()
 
     def _tick(self) -> None:
@@ -183,7 +186,8 @@ class AgentController(QObject):
         self._listening = False
         self._end_countdown()
         if self._cancel.is_set() or not text.strip():
-            self._idle()
+            if not self._expected:  # a chat order may have replaced this recording
+                self._idle()
             return
         self._chat.panel.add_message("user", text)
         self._send(Order(source=Source(source), intent=Intent.CONVERSATION, payload={"text": text}))
@@ -191,6 +195,10 @@ class AgentController(QObject):
     # Chat
 
     def _on_chat_message(self, text: str) -> None:
+        if self._listening:
+            # Typing wins over a recording in progress.
+            self._cancel.set()
+            self._end_countdown()
         self._send(Order(source=Source.CHAT, intent=Intent.CONVERSATION, payload={"text": text}))
 
     def _on_option(self, option: str) -> None:
@@ -204,6 +212,14 @@ class AgentController(QObject):
         )
 
     def _send(self, order: Order) -> None:
+        self._expected = {order.id}
+        if order.intent is Intent.CONFIRM:
+            # The hub answers a confirmation under the id of the original order.
+            self._expected.add(str(order.payload.get("reply_to")))
+        elif self._question_id is not None:
+            # Saying something else drops the pending question.
+            self._question_id = None
+            self._chat.panel.clear_options()
         self._busy = True
         self._idle_timer.stop()
         self._set_state(RobotState.THINKING)
@@ -213,8 +229,13 @@ class AgentController(QObject):
     # Replies from the hub
 
     def _on_result(self, result: Result) -> None:
-        self._thinking_timer.stop()
         self._chat.panel.add_message("assistant", result.response_text)
+        if result.id not in self._expected or self._listening:
+            # Late reply (timed out or superseded): show it, but leave the state alone.
+            return
+        self._expected = set()
+        self._thinking_timer.stop()
+        self._idle_timer.stop()
 
         if result.status is Status.QUESTION and result.options:
             self._question_id = result.id
@@ -228,6 +249,7 @@ class AgentController(QObject):
             # Keep the question or angry face while talking; otherwise the mouth moves.
             talking = state if state in (RobotState.QUESTION, RobotState.ANGRY) else None
             self._set_state(talking or RobotState.SPEAKING)
+            self._speaking = True
             self._spawn(lambda: self._speak(result.response_text))
         else:
             self._flash(state)
@@ -235,12 +257,16 @@ class AgentController(QObject):
     def _speak(self, text: str) -> None:
         try:
             self._speaker.speak(text)
+        except Exception:
+            log.exception("Speaking failed")
         finally:
             self._spoken.emit()
 
     def _on_spoken(self) -> None:
+        self._speaking = False
         if self._question_id is not None:
             self._busy = False
+            self._set_state(RobotState.QUESTION)
             self._wake_detector.resume()
             return
         self._idle()
@@ -256,6 +282,7 @@ class AgentController(QObject):
             self._idle()
 
     def _no_reply(self) -> None:
+        self._expected = set()
         self._chat.panel.add_message("assistant", NO_REPLY_TEXT)
         self._flash(RobotState.ANGRY)
 
