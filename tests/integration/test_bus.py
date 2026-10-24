@@ -15,7 +15,7 @@ from paula_agent.messaging.bus import AgentBus
 from paula_agent.messaging.messages import Action, Intent, Order, Source
 from paula_agent.messaging.signing import sign, verify
 
-URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+URL = os.environ.get("RABBITMQ_URL", "amqp://paula:paula@localhost:5672/")
 SECRET = "integration-secret"
 
 
@@ -41,7 +41,9 @@ def wait_for(predicate, timeout: float) -> bool:
 
 def test_agent_receives_signed_action_and_publishes_order():
     actions: list[Action] = []
-    bus = AgentBus(URL, SECRET, on_result=lambda r: None, on_action=actions.append, reconnect_delay=0.5)
+    bus = AgentBus(
+        URL, SECRET, on_result=lambda r: None, on_action=actions.append, reconnect_delay=0.5
+    )
     bus.start()
     try:
         connection = pika.BlockingConnection(pika.URLParameters(URL))
@@ -61,7 +63,9 @@ def test_agent_receives_signed_action_and_publishes_order():
         assert wait_for(lambda: actions, timeout=5)
         assert actions == [action]
 
-        bus.publish_order(Order(source=Source.CHAT, intent=Intent.CONVERSATION, payload={"text": "hola"}))
+        bus.publish_order(
+            Order(source=Source.CHAT, intent=Intent.CONVERSATION, payload={"text": "hola"})
+        )
 
         def got_order():
             method, properties, payload = channel.basic_get("hub.orders", auto_ack=True)

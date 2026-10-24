@@ -102,7 +102,9 @@ class AgentBus:
             try:
                 self._consume()
             except AMQPError as exc:
-                log.warning("RabbitMQ unavailable (%s); retrying in %ss", exc, self._reconnect_delay)
+                log.warning(
+                    "RabbitMQ unavailable (%s); retrying in %ss", exc, self._reconnect_delay
+                )
             finally:
                 with self._lock:
                     self._connection = self._channel = None
