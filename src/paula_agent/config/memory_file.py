@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+class MemoryBusy(Exception):
+    """The hub is writing to the memory right now."""
+
+
 @dataclass(frozen=True)
 class Fact:
     id: str
@@ -29,16 +33,21 @@ class MemoryFile:
         with closing(self._connect()) as db:
             try:
                 rows = db.execute("SELECT id, text FROM facts ORDER BY created_at").fetchall()
-            except sqlite3.OperationalError:
-                return []  # the hub has not created the table yet
+            except sqlite3.OperationalError as exc:
+                if "no such table" in str(exc):
+                    return []  # the hub has not saved anything yet
+                raise MemoryBusy(str(exc)) from exc
         return [Fact(*row) for row in rows]
 
     def delete(self, ids: list[str]) -> None:
         if not ids or not self._path.exists():
             return
-        with closing(self._connect()) as db, db:
-            db.executemany("DELETE FROM facts WHERE id = ?", [(i,) for i in ids])
+        try:
+            with closing(self._connect()) as db, db:
+                db.executemany("DELETE FROM facts WHERE id = ?", [(i,) for i in ids])
+        except sqlite3.OperationalError as exc:
+            raise MemoryBusy(str(exc)) from exc
 
     def _connect(self) -> sqlite3.Connection:
-        # The hub may be writing at the same time: wait for its lock instead of failing.
-        return sqlite3.connect(str(self._path), timeout=5)
+        # The hub may be writing: wait a moment for its lock, but never freeze the window.
+        return sqlite3.connect(str(self._path), timeout=1)

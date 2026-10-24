@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 
 from paula_agent.audio.devices import AudioDevice
 from paula_agent.config.env_file import update_env
-from paula_agent.config.memory_file import MemoryFile
+from paula_agent.config.memory_file import MemoryBusy, MemoryFile
 from paula_agent.config.settings import Settings
 from paula_agent.ui import theme
 
@@ -100,6 +100,9 @@ class SettingsWindow(QWidget):
         tabs.addTab(self._activation_tab(), "Activación")
         tabs.addTab(self._memory_tab(), "Memoria")
 
+        self.error = QLabel("")
+        self.error.setStyleSheet("color: #B91C1C;")
+        self.error.setWordWrap(True)
         self.save_button = QPushButton("Guardar y reiniciar Paula")
         self.save_button.clicked.connect(self.save)
         cancel = QPushButton("Cancelar")
@@ -111,6 +114,7 @@ class SettingsWindow(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addWidget(tabs)
+        layout.addWidget(self.error)
         layout.addLayout(buttons)
 
         self._meter_timer = QTimer(self, interval=60, timeout=self._update_meter)
@@ -124,7 +128,7 @@ class SettingsWindow(QWidget):
         self.level.setFixedHeight(10)
         self.mic.currentIndexChanged.connect(self._restart_meter)
         test = QPushButton("Probar sonido")
-        test.clicked.connect(lambda: self._play_tone(self.speaker.currentData()))
+        test.clicked.connect(self._test_sound)
 
         page = QWidget()
         form = QFormLayout(page)
@@ -202,21 +206,40 @@ class SettingsWindow(QWidget):
             return ""
         return combo.currentText().removesuffix(" (no conectado)")
 
+    def _test_sound(self) -> None:
+        try:
+            self._play_tone(self.speaker.currentData())
+            self.error.clear()
+        except Exception:
+            log.exception("Test tone failed")
+            self.error.setText("No pude reproducir sonido por esa salida. ¿Está conectada?")
+
     def _reload_facts(self) -> None:
         self.facts.clear()
-        facts = self._memory.facts()
+        try:
+            facts = self._memory.facts()
+        except MemoryBusy:
+            self._hint("La memoria está ocupada ahora mismo. Vuelve a abrir la ventana.")
+            return
         for fact in facts:
             item = QListWidgetItem(fact.text)
             item.setData(Qt.ItemDataRole.UserRole, fact.id)
             self.facts.addItem(item)
         if not facts:
-            empty = QListWidgetItem("Paula todavía no recuerda nada.")
-            empty.setFlags(Qt.ItemFlag.NoItemFlags)
-            self.facts.addItem(empty)
+            self._hint("Paula todavía no recuerda nada.")
+
+    def _hint(self, text: str) -> None:
+        item = QListWidgetItem(text)
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        self.facts.addItem(item)
 
     def _delete_selected(self) -> None:
         ids = [item.data(Qt.ItemDataRole.UserRole) for item in self.facts.selectedItems()]
-        self._memory.delete([i for i in ids if i])
+        try:
+            self._memory.delete([i for i in ids if i])
+            self.error.clear()
+        except MemoryBusy:
+            self.error.setText("La memoria está ocupada. Inténtalo de nuevo en un momento.")
         self._reload_facts()
 
     def changes(self) -> dict[str, str]:
@@ -233,7 +256,15 @@ class SettingsWindow(QWidget):
         }
 
     def save(self) -> None:
-        update_env(self._env_file, self.changes())
+        try:
+            update_env(self._env_file, self.changes())
+        except ValueError:
+            self.error.setText("Algún valor tiene caracteres no permitidos (saltos de línea o ${).")
+            return
+        except OSError:
+            log.exception("Could not write %s", self._env_file)
+            self.error.setText("No pude guardar la configuración. ¿El archivo .env está abierto?")
+            return
         self.close()
         self.saved.emit()
 

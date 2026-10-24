@@ -2,9 +2,11 @@ import sqlite3
 from typing import ClassVar
 
 import pytest
+from dotenv import dotenv_values
 
+from paula_agent.__main__ import fresh_environment
 from paula_agent.audio.devices import AudioDevice
-from paula_agent.config.memory_file import MemoryFile
+from paula_agent.config.memory_file import MemoryBusy, MemoryFile
 from paula_agent.config.settings import Settings
 from paula_agent.ui.settings.window import SettingsWindow
 
@@ -77,12 +79,12 @@ def test_save_writes_env_and_signals_restart(qapp, env, tmp_path):
 
     window.save()
 
-    text = env.read_text("utf-8")
-    assert "AGENT_SHARED_SECRET=" + "x" * 32 in text  # untouched
-    assert "MIC_DEVICE=Micrófono (USB)" in text
-    assert "SPEAKER_DEVICE=Altavoces" in text
-    assert "CONVERSATION_SECONDS=12" in text
-    assert "EXCLUDED_APPS=discord.exe,pioneergame.exe" in text
+    values = dotenv_values(env)
+    assert values["AGENT_SHARED_SECRET"] == "x" * 32  # untouched
+    assert values["MIC_DEVICE"] == "Micrófono (USB)"
+    assert values["SPEAKER_DEVICE"] == "Altavoces"
+    assert values["CONVERSATION_SECONDS"] == "12"
+    assert values["EXCLUDED_APPS"] == "discord.exe,pioneergame.exe"
     assert saved == [True]
 
 
@@ -128,3 +130,39 @@ def test_empty_memory_shows_a_hint(qapp, env, tmp_path):
     window = make(env, tmp_path)
 
     assert window.facts.item(0).text() == "Paula todavía no recuerda nada."
+
+
+def test_save_error_is_shown_and_nothing_restarts(qapp, env, tmp_path):
+    window = make(env, tmp_path)
+    saved = []
+    window.saved.connect(lambda: saved.append(True))
+    window.excluded.setText("${AGENT_SHARED_SECRET}")
+
+    window.save()
+
+    assert saved == []
+    assert window.error.text()
+
+
+def test_busy_memory_is_reported(qapp, env, tmp_path):
+    class Busy:
+        def facts(self):
+            raise MemoryBusy("locked")
+
+        def delete(self, ids):
+            raise MemoryBusy("locked")
+
+    window = make(env, tmp_path, Busy())
+
+    assert "ocupada" in window.facts.item(0).text()
+
+
+def test_restart_environment_drops_keys_from_env_file(env, monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_SPEED", "1.00")  # copied by load_dotenv at start-up
+    env.write_text(env.read_text("utf-8") + "ELEVENLABS_SPEED='1.20'" + chr(10), "utf-8")
+
+    fresh = fresh_environment(env)
+
+    assert "ELEVENLABS_SPEED" not in fresh
+    assert "AGENT_SHARED_SECRET" not in fresh
+    assert "PATH" in fresh

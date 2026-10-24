@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
+from dotenv import dotenv_values
 from PySide6.QtWidgets import QApplication
 
 from paula_agent.activation.foreground import ExclusionPolicy, foreground_window
@@ -55,6 +58,16 @@ class LazyWakeWord:
             self._detector.stop()
 
 
+def fresh_environment(env_file: Path) -> dict[str, str]:
+    """This process's environment without the keys from `.env`.
+
+    `load_dotenv` copied them into os.environ and never overrides what is already set,
+    so a child that inherited them would ignore the values just saved.
+    """
+    from_file = dotenv_values(env_file)
+    return {k: v for k, v in os.environ.items() if k not in from_file}
+
+
 def main() -> int:
     try:
         settings = Settings.from_env()
@@ -99,13 +112,17 @@ def main() -> int:
 
     def open_settings() -> None:
         nonlocal settings_window
-        if settings_window is None:
-            settings_window = SettingsWindow(
-                settings,
-                list_devices=list_devices,
-                memory=MemoryFile(log_dir().parent / "memory.sqlite3"),
-            )
-            settings_window.saved.connect(restart_paula)
+        # Built fresh each time: devices plugged in since, current memory, and no
+        # leftover edits from a cancelled visit.
+        if settings_window is not None:
+            settings_window.close()
+            settings_window.deleteLater()
+        settings_window = SettingsWindow(
+            settings,
+            list_devices=list_devices,
+            memory=MemoryFile(log_dir().parent / "memory.sqlite3"),
+        )
+        settings_window.saved.connect(restart_paula)
         settings_window.show()
         settings_window.raise_()
         settings_window.activateWindow()
@@ -167,7 +184,11 @@ def main() -> int:
     if restart:
         # New settings are read at start-up. sys.executable is the venv interpreter.
         log.info("Restarting to apply new settings")
-        subprocess.Popen([sys.executable, "-m", "paula_agent"], cwd=settings.env_file.parent)
+        subprocess.Popen(
+            [sys.executable, "-m", "paula_agent"],
+            cwd=settings.env_file.parent,
+            env=fresh_environment(settings.env_file),
+        )
     return code
 
 
