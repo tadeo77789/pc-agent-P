@@ -72,7 +72,8 @@ class CommandRunner:
             output, status = command(action), Status.OK
         except CommandError as exc:
             output, status = str(exc), Status.ERROR
-        except OSError as exc:
+        except Exception as exc:
+            # Always answer: without an Event the hub would wait forever.
             log.exception("Command %s failed", action.command)
             output, status = f"The PC could not run it: {exc}", Status.ERROR
         return Event(
