@@ -25,10 +25,12 @@ LEAD_IN_SECONDS = 0.3
 WAKE_AFTER_SECONDS = 2.0
 
 
-def sounddevice_stream(rate: int):
+def sounddevice_stream(rate: int, device: int | None = None):
     import sounddevice as sd
 
-    return sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16", latency="high")
+    return sd.RawOutputStream(
+        samplerate=rate, channels=1, dtype="int16", latency="high", device=device
+    )
 
 
 class SoundDevicePlayer:
@@ -36,11 +38,13 @@ class SoundDevicePlayer:
         self,
         rate: int = PCM_RATE,
         clock: Callable[[], float] = time.monotonic,
-        open_stream: Callable[[int], object] = sounddevice_stream,
+        open_stream: Callable[..., object] = sounddevice_stream,
+        device: int | None = None,
     ):
         self._rate = rate
         self._clock = clock
         self._open_stream = open_stream
+        self._device = device
         self._last_end: float | None = None
 
     def lead_in(self) -> bytes:
@@ -50,7 +54,7 @@ class SoundDevicePlayer:
     def __call__(self, chunks: Iterable[bytes], stop: threading.Event) -> None:
         lead_in = self.lead_in()
         prebuffer = PREBUFFER_SECONDS if lead_in else NEXT_SENTENCE_PREBUFFER_SECONDS
-        stream = self._open_stream(self._rate)
+        stream = self._open_stream(self._rate, self._device)
         stream.start()
         try:
             for block in buffered(chunks, lead_in, self._rate, stop, prebuffer):

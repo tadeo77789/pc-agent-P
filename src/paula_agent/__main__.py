@@ -11,9 +11,10 @@ from PySide6.QtWidgets import QApplication
 from paula_agent.activation.foreground import ExclusionPolicy, foreground_window
 from paula_agent.activation.hotkey import HotkeyListener
 from paula_agent.activation.wake_word import WakeWordDetector, ensure_model
+from paula_agent.audio.devices import resolve
 from paula_agent.audio.recorder import Recorder
 from paula_agent.audio.stt import Transcriber
-from paula_agent.audio.tts import Speaker
+from paula_agent.audio.tts import SoundDevicePlayer, Speaker
 from paula_agent.commands.runner import CommandRunner, load_apps
 from paula_agent.config.settings import Settings, SettingsError, log_dir, setup_logging
 from paula_agent.controller import AgentController
@@ -67,6 +68,7 @@ def main() -> int:
     app.setQuitOnLastWindowClosed(False)
     stage, chat = StageWindow(), ChatWindow()
 
+    mic = resolve(settings.mic_device, "input")
     transcriber = Transcriber(
         settings.whisper_model, settings.whisper_language, settings.whisper_device
     )
@@ -75,6 +77,7 @@ def main() -> int:
         settings.elevenlabs_voice_id,
         settings.elevenlabs_model,
         speed=settings.elevenlabs_speed,
+        player=SoundDevicePlayer(device=resolve(settings.speaker_device, "output")),
     )
     if not speaker.enabled:
         log.warning("ELEVENLABS_API_KEY is empty: replies will only appear in the chat")
@@ -92,7 +95,7 @@ def main() -> int:
         stage,
         chat,
         bus=bus,
-        recorder=Recorder(),
+        recorder=Recorder(device=mic),
         transcriber=transcriber,
         speaker=speaker,
         runner=CommandRunner(load_apps(settings.apps_file)),
@@ -119,6 +122,7 @@ def main() -> int:
                     controller.wake_word_heard,
                     wake_words=settings.wake_words,
                     min_confidence=settings.wake_word_min_confidence,
+                    device=mic,
                 )
             )
             log.info("Wake word ready")

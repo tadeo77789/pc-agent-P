@@ -49,6 +49,8 @@ class Settings:
     elevenlabs_voice_id: str
     elevenlabs_model: str
     elevenlabs_speed: float
+    mic_device: str
+    speaker_device: str
     whisper_model: str
     whisper_language: str
     whisper_device: str
@@ -92,6 +94,8 @@ class Settings:
             elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID", "86V9x9hrQds83qf7zaGn"),
             elevenlabs_model=os.environ.get("ELEVENLABS_MODEL", "eleven_flash_v2_5"),
             elevenlabs_speed=speed,
+            mic_device=os.environ.get("MIC_DEVICE", "").strip(),
+            speaker_device=os.environ.get("SPEAKER_DEVICE", "").strip(),
             whisper_model=os.environ.get("WHISPER_MODEL", "small"),
             whisper_language=os.environ.get("WHISPER_LANGUAGE", "es"),
             whisper_device=whisper_device,
