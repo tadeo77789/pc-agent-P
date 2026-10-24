@@ -119,7 +119,7 @@ class ChatPanel(QFrame):
 
     # Public API
 
-    def add_message(self, role: str, text: str) -> None:
+    def add_message(self, role: str, text: str) -> Bubble:
         row = QHBoxLayout()
         bubble = Bubble(text, role)
         if role == "user":
@@ -129,6 +129,7 @@ class ChatPanel(QFrame):
             row.addStretch()
         self._messages.insertLayout(self._messages.count() - 1, row)
         QTimer.singleShot(0, self._scroll_to_bottom)
+        return bubble
 
     def show_options(self, options: list[str]) -> None:
         self.clear_options()

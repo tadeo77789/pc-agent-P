@@ -109,6 +109,7 @@ def make(parts):
         foreground=lambda: parts["window"],
         open_settings=lambda: parts["opened"].append(True),
         spawn=lambda work: work(),
+        threaded_speech=False,
     )
 
 
@@ -366,3 +367,47 @@ def test_chat_reply_while_transcribing_is_accepted(parts):
     assert parts["speaker"].spoken == ["Hecho."]
     assert state(parts) is RobotState.SLEEPING
     assert not controller._thinking_timer.isActive()
+
+
+def test_partials_are_spoken_as_they_arrive_and_not_repeated(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+
+    controller.result_received(reply(order, "Hola, Ola.", status=Status.PENDING, partial=True))
+    assert state(parts) is RobotState.SPEAKING
+    assert parts["speaker"].spoken == ["Hola, Ola."]
+    controller.result_received(reply(order, "Todo va bien.", status=Status.PENDING, partial=True))
+    controller.result_received(reply(order, "Hola, Ola. Todo va bien."))
+
+    assert parts["speaker"].spoken == ["Hola, Ola.", "Todo va bien."]
+    assert state(parts) is RobotState.SLEEPING
+    assistant_bubbles = [b.text() for b in parts["chat"].panel.bubbles() if b.role == "assistant"]
+    assert assistant_bubbles[-1] == "Hola, Ola. Todo va bien."
+    assert assistant_bubbles.count("Hola, Ola. Todo va bien.") == 1
+
+
+def test_final_error_after_partials_is_spoken(parts):
+    controller = make(parts)
+    controller.wake_word_heard()
+    order = parts["bus"].orders[0]
+
+    controller.result_received(reply(order, "Claro, lo abro.", status=Status.PENDING, partial=True))
+    controller.result_received(
+        reply(order, "No pude abrirlo.", status=Status.ERROR, robot_state=RobotState.ANGRY)
+    )
+
+    assert parts["speaker"].spoken == ["Claro, lo abro.", "No pude abrirlo."]
+
+
+def test_late_partials_are_ignored(parts):
+    controller = make(parts)
+    parts["chat"].panel.message_sent.emit("hola")
+    order = parts["bus"].orders[0]
+    controller._no_reply()
+    bubbles = len(parts["chat"].panel.bubbles())
+
+    controller.result_received(reply(order, "Tarde.", status=Status.PENDING, partial=True))
+
+    assert len(parts["chat"].panel.bubbles()) == bubbles
+    assert parts["speaker"].spoken == []
