@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pika",
+    "psutil",
     "python-dotenv",
 ]
 
@@ -21,6 +22,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+paula_agent = ["config/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
