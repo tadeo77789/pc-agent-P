@@ -110,3 +110,11 @@ def test_chat_window_opens_next_to_stage(qapp):
 
     assert chat.isVisible()
     assert chat.x() < stage.x() + stage.width() // 2
+
+
+def test_bubbles_render_plain_text(qapp):
+    panel = ChatPanel()
+
+    panel.add_message("assistant", "<b>hola</b>")
+
+    assert panel.bubbles()[-1].textFormat() == Qt.TextFormat.PlainText
